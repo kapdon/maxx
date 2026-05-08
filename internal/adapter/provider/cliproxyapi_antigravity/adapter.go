@@ -13,6 +13,7 @@ import (
 	"github.com/awsl-project/maxx/internal/adapter/provider"
 	"github.com/awsl-project/maxx/internal/domain"
 	"github.com/awsl-project/maxx/internal/flow"
+	"github.com/awsl-project/maxx/internal/modelavailability"
 	"github.com/awsl-project/maxx/internal/usage"
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/executor"
@@ -32,6 +33,7 @@ func NewAdapter(p *domain.Provider) (provider.ProviderAdapter, error) {
 	}
 
 	cfg := p.Config.CLIProxyAPIAntigravity
+	modelavailability.RegisterCLIProxyAntigravityProvider(p)
 
 	// 创建 Auth 对象，executor 内部会自动处理 token 刷新
 	authObj := &auth.Auth{

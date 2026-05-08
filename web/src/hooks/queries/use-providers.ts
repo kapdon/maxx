@@ -5,6 +5,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getTransport, type Provider, type CreateProviderData } from '@/lib/transport';
 import { routeKeys } from './use-routes';
+import { availableModelKeys } from './use-available-models';
 
 // Query Keys
 export const providerKeys = {
@@ -42,6 +43,7 @@ export function useCreateProvider() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: providerKeys.lists() });
       queryClient.invalidateQueries({ queryKey: routeKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: availableModelKeys.all });
     },
   });
 }
@@ -65,6 +67,7 @@ export function useUpdateProvider() {
       queryClient.invalidateQueries({ queryKey: providerKeys.detail(id) });
       queryClient.invalidateQueries({ queryKey: providerKeys.lists() });
       queryClient.invalidateQueries({ queryKey: routeKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: availableModelKeys.all });
     },
   });
 }
@@ -78,6 +81,7 @@ export function useDeleteProvider() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: providerKeys.lists() });
       queryClient.invalidateQueries({ queryKey: routeKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: availableModelKeys.all });
     },
   });
 }

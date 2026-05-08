@@ -271,6 +271,7 @@ export interface Transport {
 
   // ===== Response Model API =====
   getResponseModels(): Promise<string[]>;
+  getAvailableModels(): Promise<string[]>;
 
   // ===== Backup API =====
   exportBackup(): Promise<BackupFile>;

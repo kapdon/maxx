@@ -9,6 +9,20 @@ function json(route: Route, body: unknown, status = 200) {
 }
 
 async function mockModelMappingApis(page: Page) {
+  await page.route('**/v1/models', async (route) =>
+    json(route, {
+      object: 'list',
+      data: [
+        {
+          id: 'gpt-live-mapping-option',
+          object: 'model',
+          created: 0,
+          owned_by: 'maxx',
+        },
+      ],
+    }),
+  );
+
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
     const { pathname } = url;
@@ -38,7 +52,7 @@ async function mockModelMappingApis(page: Page) {
         {
           id: 1,
           createdAt: '2026-05-08T00:00:00Z',
-          modelId: 'gpt-live-mapping-option',
+          modelId: 'gpt-pricing-only-option',
           inputPriceMicro: 1000,
           outputPriceMicro: 2000,
           cacheReadPriceMicro: 0,
@@ -77,7 +91,7 @@ async function mockModelMappingApis(page: Page) {
   });
 }
 
-test('model mapping inputs include configured model-pricing options', async ({ page }) => {
+test('model mapping inputs include models advertised by availability endpoint', async ({ page }) => {
   await mockModelMappingApis(page);
 
   await page.goto('/model-mappings', { waitUntil: 'domcontentloaded' });
@@ -86,10 +100,11 @@ test('model mapping inputs include configured model-pricing options', async ({ p
   await page.getByRole('button', { name: /^Target$/ }).click();
   await page.getByPlaceholder(/search or enter custom model/i).fill('gpt-live-mapping-option');
 
-  await expect(page.getByText('Configured Pricing')).toBeVisible();
+  await expect(page.getByLabel('Select Model').getByText('OpenAI')).toBeVisible();
   await expect(
     page.getByRole('button', {
       name: /gpt-live-mapping-option\s+gpt-live-mapping-option/,
     }),
   ).toBeVisible();
+  await expect(page.getByText('gpt-pricing-only-option')).toHaveCount(0);
 });

@@ -24,12 +24,6 @@ func TestGetModels(t *testing.T) {
 		t.Fatal("Expected 'data' to be an array")
 	}
 
-	// In a fresh environment with no providers, the model list comes from
-	// the default pricing table, so it should not be empty
-	if len(data) == 0 {
-		t.Fatal("Expected at least some models from default pricing table")
-	}
-
 	// Verify each model entry has expected fields
 	for i, item := range data {
 		model, ok := item.(map[string]any)
@@ -47,6 +41,7 @@ func TestGetModels(t *testing.T) {
 
 func TestGetModels_ResponseFormat(t *testing.T) {
 	env := NewTestEnv(t)
+	createProviderWithSupportModels(t, env, []string{"gpt-e2e-available"})
 
 	resp := env.UnauthGet("/v1/models")
 	AssertStatus(t, resp, http.StatusOK)
@@ -64,8 +59,8 @@ func TestGetModels_ResponseFormat(t *testing.T) {
 		t.Fatal("Expected 'data' to be an array")
 	}
 
-	if len(data) == 0 {
-		t.Fatal("Expected at least one model in data array")
+	if !containsOpenAIModelData(data, "gpt-e2e-available") {
+		t.Fatal("expected model list to include provider-supported model")
 	}
 
 	// Verify OpenAI-compatible fields on each model entry
@@ -86,7 +81,7 @@ func TestGetModels_ResponseFormat(t *testing.T) {
 	}
 }
 
-func TestModelPricesFeedAvailableModelsForMappingOptions(t *testing.T) {
+func TestModelPricesDoNotFeedAvailableModelsForMappingOptions(t *testing.T) {
 	env := NewTestEnv(t)
 
 	for _, price := range []map[string]any{
@@ -107,20 +102,62 @@ func TestModelPricesFeedAvailableModelsForMappingOptions(t *testing.T) {
 	}
 
 	openAIIDs := fetchModelIDsForUserAgent(t, env, "codex_cli_rs/0.99.0")
-	if !containsModelID(openAIIDs, "gpt-live-mapping-option") {
-		t.Fatalf("expected OpenAI/Codex model list to include model from current pricing table")
-	}
-	if containsModelID(openAIIDs, "claude-live-mapping-option") {
-		t.Fatalf("did not expect Claude pricing model in OpenAI/Codex model list")
+	if containsModelID(openAIIDs, "gpt-live-mapping-option") || containsModelID(openAIIDs, "claude-live-mapping-option") {
+		t.Fatalf("did not expect model prices to advertise availability")
 	}
 
 	claudeIDs := fetchModelIDsForUserAgent(t, env, "claude-cli/2.1.17")
-	if !containsModelID(claudeIDs, "claude-live-mapping-option") {
-		t.Fatalf("expected Claude model list to include model from current pricing table")
+	if containsModelID(claudeIDs, "gpt-live-mapping-option") || containsModelID(claudeIDs, "claude-live-mapping-option") {
+		t.Fatalf("did not expect model prices to advertise availability in Claude format")
 	}
-	if containsModelID(claudeIDs, "gpt-live-mapping-option") {
-		t.Fatalf("did not expect OpenAI/Codex pricing model in Claude model list")
+}
+
+func TestProviderSupportModelsFeedAvailableModels(t *testing.T) {
+	env := NewTestEnv(t)
+	createProviderWithSupportModels(t, env, []string{"gpt-live-mapping-option", "claude-live-mapping-option", "*"})
+
+	ids := fetchModelIDsForUserAgent(t, env, "codex_cli_rs/0.99.0")
+	if !containsModelID(ids, "gpt-live-mapping-option") {
+		t.Fatalf("expected provider-supported model in available model list")
 	}
+	if !containsModelID(ids, "claude-live-mapping-option") {
+		t.Fatalf("expected all concrete provider-supported models in available model list")
+	}
+	if containsModelID(ids, "*") {
+		t.Fatalf("did not expect wildcard support model in available model list")
+	}
+}
+
+func createProviderWithSupportModels(t *testing.T, env *TestEnv, supportModels []string) {
+	t.Helper()
+	provider := map[string]any{
+		"name": "models-provider",
+		"type": "custom",
+		"config": map[string]any{
+			"custom": map[string]any{
+				"baseURL": "https://api.example.com",
+				"apiKey":  "sk-test-key",
+			},
+		},
+		"supportedClientTypes": []string{"codex"},
+		"supportModels":        supportModels,
+	}
+	resp := env.AdminPost("/api/admin/providers", provider)
+	AssertStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+}
+
+func containsOpenAIModelData(data []any, want string) bool {
+	for _, item := range data {
+		model, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if model["id"] == want {
+			return true
+		}
+	}
+	return false
 }
 
 func fetchModelIDsForUserAgent(t *testing.T, env *TestEnv, userAgent string) []string {

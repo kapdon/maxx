@@ -8,6 +8,7 @@ import (
 	"github.com/awsl-project/maxx/internal/adapter/provider"
 	"github.com/awsl-project/maxx/internal/cooldown"
 	"github.com/awsl-project/maxx/internal/domain"
+	"github.com/awsl-project/maxx/internal/modelavailability"
 	"github.com/awsl-project/maxx/internal/repository/cached"
 )
 
@@ -86,6 +87,9 @@ func (r *Router) InitAdapters() error {
 
 // RefreshAdapter refreshes the adapter for a specific provider
 func (r *Router) RefreshAdapter(p *domain.Provider) error {
+	if p != nil {
+		modelavailability.UnregisterCLIProxyProvider(p.ID)
+	}
 	factory, ok := provider.GetAdapterFactory(p.Type)
 	if !ok {
 		return nil
@@ -103,6 +107,7 @@ func (r *Router) RefreshAdapter(p *domain.Provider) error {
 
 // RemoveAdapter removes the adapter for a provider
 func (r *Router) RemoveAdapter(providerID uint64) {
+	modelavailability.UnregisterCLIProxyProvider(providerID)
 	r.mu.Lock()
 	delete(r.adapters, providerID)
 	r.mu.Unlock()
@@ -348,4 +353,3 @@ func (r *Router) injectProviderUpdate(a provider.ProviderAdapter) {
 		})
 	}
 }
-

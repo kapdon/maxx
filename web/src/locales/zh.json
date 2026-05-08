@@ -1123,8 +1123,8 @@
     "createTitle": "添加模型价格",
     "editTitle": "编辑模型价格",
     "confirmDelete": "确定要删除此价格吗？这可能会影响成本计算。",
-    "updateFromModelsDev": "从 models.dev 更新",
-    "confirmUpdateFromModelsDev": "要从 models.dev 更新模型价格吗？这将替换所有当前价格。如果无法访问 models.dev，Maxx 将改为重新加载内置默认价格。",
+    "updateFromModelsDev": "更新可用模型价格",
+    "confirmUpdateFromModelsDev": "要为 /v1/models 当前展示的模型更新价格吗？这将替换所有当前价格。models.dev 仅用于这些可用模型；如果无法访问，Maxx 将改为重新加载匹配的内置默认价格。",
     "resetToDefaults": "重置为默认",
     "confirmReset": "确定要重置为默认价格吗？这将用内置的默认价格替换所有当前价格。"
   },

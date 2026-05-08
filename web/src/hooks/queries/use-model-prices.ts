@@ -76,7 +76,7 @@ export function useDeleteModelPrice() {
   });
 }
 
-// 从 models.dev 更新 Model Prices
+// 更新当前可访问模型的 Model Prices（models.dev 仅作为价格来源）
 export function useUpdateModelPricesFromModelsDev() {
   const queryClient = useQueryClient();
 

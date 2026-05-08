@@ -114,3 +114,36 @@ func TestParseModelsDevPriceTableRejectsCatalogWithoutPricedModels(t *testing.T)
 		t.Fatal("expected error for catalog without priced models")
 	}
 }
+
+func TestFilterPriceTableByModelIDsKeepsOnlyAccessibleModels(t *testing.T) {
+	table := NewPriceTable("test")
+	table.Set(&ModelPricing{ModelID: "gpt-accessible", InputPriceMicro: 1, OutputPriceMicro: 2})
+	table.Set(&ModelPricing{ModelID: "gpt-unavailable", InputPriceMicro: 3, OutputPriceMicro: 4})
+	table.Set(&ModelPricing{ModelID: "claude-sonnet-4-6", InputPriceMicro: 5, OutputPriceMicro: 6})
+
+	filtered := FilterPriceTableByModelIDs(table, []string{
+		"gpt-accessible",
+		"models/gpt-accessible",
+		"claude-sonnet-4-6-thinking",
+		"*wildcard",
+	})
+
+	if len(filtered.Models) != 2 {
+		t.Fatalf("filtered model count = %d, want 2", len(filtered.Models))
+	}
+	if filtered.Get("gpt-accessible") == nil {
+		t.Fatal("expected accessible exact model price")
+	}
+	if filtered.Get("gpt-unavailable") != nil {
+		t.Fatal("did not expect unavailable model price")
+	}
+	if filtered.Get("claude-sonnet-4-6-thinking") == nil {
+		t.Fatal("expected prefix price for thinking variant")
+	}
+	if filtered.Models["claude-sonnet-4-6-thinking"] == nil {
+		t.Fatal("expected prefix price copied onto concrete accessible model ID")
+	}
+	if filtered.Models["claude-sonnet-4-6"] != nil {
+		t.Fatal("did not expect base prefix row to be imported as an unavailable model ID")
+	}
+}

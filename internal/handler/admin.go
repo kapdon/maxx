@@ -1860,7 +1860,10 @@ func (h *AdminHandler) handleModelPricesReset(w http.ResponseWriter, r *http.Req
 
 // handleModelPricesUpdate handles POST /admin/model-prices/update
 func (h *AdminHandler) handleModelPricesUpdate(w http.ResponseWriter, r *http.Request) {
-	prices, err := h.svc.UpdateModelPricesFromModelsDev(r.Context())
+	// Mirror the public /v1/models inventory rather than the admin user's tenant
+	// context, because that model-list endpoint is the source of truth for this
+	// pricing refresh.
+	prices, err := h.svc.UpdateModelPricesFromModelsDev(r.Context(), domain.TenantIDAll)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

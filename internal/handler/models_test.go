@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/awsl-project/maxx/internal/domain"
+	"github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy"
 )
 
 type fakeResponseModelRepo struct {
@@ -226,7 +227,15 @@ func TestModelsHandlerFormats(t *testing.T) {
 	}
 }
 
-func TestModelsHandlerPricingSupplementByUserAgent(t *testing.T) {
+func TestModelsHandlerUsesCLIProxyAPIRegistryModels(t *testing.T) {
+	registry := cliproxy.GlobalModelRegistry()
+	registry.RegisterClient("models-handler-test-codex", "codex", []*cliproxy.ModelInfo{{ID: "gpt-registry-live"}})
+	registry.RegisterClient("models-handler-test-claude", "claude", []*cliproxy.ModelInfo{{ID: "claude-registry-live"}})
+	t.Cleanup(func() {
+		registry.UnregisterClient("models-handler-test-codex")
+		registry.UnregisterClient("models-handler-test-claude")
+	})
+
 	handler := NewModelsHandler(nil, nil, nil, nil)
 
 	openAIReq := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
@@ -248,20 +257,11 @@ func TestModelsHandlerPricingSupplementByUserAgent(t *testing.T) {
 	for _, item := range openAIPayload.Data {
 		openAIIDs = append(openAIIDs, item.ID)
 	}
-	if !containsModel(openAIIDs, "gpt-5.3") {
-		t.Fatalf("expected gpt-5.3 in openai model list")
+	if !containsModel(openAIIDs, "gpt-registry-live") {
+		t.Fatalf("expected gpt-registry-live in model list")
 	}
-	if !containsModel(openAIIDs, "gpt-5.4-mini") {
-		t.Fatalf("expected gpt-5.4-mini in openai model list")
-	}
-	if !containsModel(openAIIDs, "gpt-5.5") {
-		t.Fatalf("expected gpt-5.5 in openai model list")
-	}
-	if !containsModel(openAIIDs, "gpt-5.5-pro") {
-		t.Fatalf("expected gpt-5.5-pro in openai model list")
-	}
-	if containsModel(openAIIDs, "claude-opus-4-6") {
-		t.Fatalf("did not expect claude pricing-only model in codex model list")
+	if !containsModel(openAIIDs, "claude-registry-live") {
+		t.Fatalf("expected claude-registry-live in model list")
 	}
 
 	claudeReq := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
@@ -283,15 +283,15 @@ func TestModelsHandlerPricingSupplementByUserAgent(t *testing.T) {
 	for _, item := range claudePayload.Data {
 		claudeIDs = append(claudeIDs, item.ID)
 	}
-	if !containsModel(claudeIDs, "claude-opus-4-6") {
-		t.Fatalf("expected claude-opus-4-6 in claude model list")
+	if !containsModel(claudeIDs, "claude-registry-live") {
+		t.Fatalf("expected claude-registry-live in claude-format model list")
 	}
-	if containsModel(claudeIDs, "gpt-5.3") {
-		t.Fatalf("did not expect gpt-5.3 in claude model list")
+	if !containsModel(claudeIDs, "gpt-registry-live") {
+		t.Fatalf("expected gpt-registry-live in claude-format model list")
 	}
 }
 
-func TestModelsHandlerUsesCurrentModelPricesForSupplements(t *testing.T) {
+func TestModelsHandlerDoesNotUseCurrentModelPricesForAvailability(t *testing.T) {
 	priceRepo := &fakeModelPriceRepo{
 		prices: []*domain.ModelPrice{
 			{ModelID: "gpt-live-from-pricing"},
@@ -320,55 +320,10 @@ func TestModelsHandlerUsesCurrentModelPricesForSupplements(t *testing.T) {
 	for _, item := range openAIPayload.Data {
 		openAIIDs = append(openAIIDs, item.ID)
 	}
-	if !containsModel(openAIIDs, "gpt-live-from-pricing") {
-		t.Fatalf("expected gpt-live-from-pricing from current model prices")
+	if containsModel(openAIIDs, "gpt-live-from-pricing") {
+		t.Fatalf("did not expect pricing-only model in model availability list")
 	}
-	if containsModel(openAIIDs, "claude-live-from-pricing") {
-		t.Fatalf("did not expect claude-live-from-pricing in codex/openai model list")
-	}
-	if containsModel(openAIIDs, "*wildcard-skip") {
+	if containsModel(openAIIDs, "claude-live-from-pricing") || containsModel(openAIIDs, "*wildcard-skip") {
 		t.Fatalf("did not expect wildcard price row in model list")
-	}
-
-	claudeReq := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-	claudeReq.Header.Set("User-Agent", "claude-cli/2.1.17")
-	claudeRec := httptest.NewRecorder()
-	handler.ServeHTTP(claudeRec, claudeReq)
-	if claudeRec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", claudeRec.Code)
-	}
-	var claudePayload struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(claudeRec.Body.Bytes(), &claudePayload); err != nil {
-		t.Fatalf("invalid claude payload: %v", err)
-	}
-	claudeIDs := make([]string, 0, len(claudePayload.Data))
-	for _, item := range claudePayload.Data {
-		claudeIDs = append(claudeIDs, item.ID)
-	}
-	if !containsModel(claudeIDs, "claude-live-from-pricing") {
-		t.Fatalf("expected claude-live-from-pricing from current model prices")
-	}
-	if containsModel(claudeIDs, "gpt-live-from-pricing") {
-		t.Fatalf("did not expect gpt-live-from-pricing in claude model list")
-	}
-
-}
-
-func TestShouldIncludePricingModelForUserAgentOpenAIOSeriesMatching(t *testing.T) {
-	if !shouldIncludePricingModelForUserAgent("o1-mini", "codex_cli_rs/0.98.0") {
-		t.Fatalf("expected o1-mini to be included")
-	}
-	if !shouldIncludePricingModelForUserAgent("o3-mini", "codex_cli_rs/0.98.0") {
-		t.Fatalf("expected o3-mini to be included")
-	}
-	if !shouldIncludePricingModelForUserAgent("o4-mini", "codex_cli_rs/0.98.0") {
-		t.Fatalf("expected o4-mini to be included")
-	}
-	if shouldIncludePricingModelForUserAgent("ollama-foo", "codex_cli_rs/0.98.0") {
-		t.Fatalf("did not expect ollama-foo to be included")
 	}
 }

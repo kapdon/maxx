@@ -12,6 +12,7 @@ import (
 
 	"github.com/awsl-project/maxx/internal/domain"
 	"github.com/awsl-project/maxx/internal/pricing"
+	"github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy"
 )
 
 func TestUpdateModelPricesFromModelsDevReplacesCurrentPrices(t *testing.T) {
@@ -31,6 +32,10 @@ func TestUpdateModelPricesFromModelsDevReplacesCurrentPrices(t *testing.T) {
 					"gpt-remote": {
 						"id": "gpt-remote",
 						"cost": {"input": 1.25, "output": 10, "cache_read": 0.125}
+					},
+					"gpt-unavailable": {
+						"id": "gpt-unavailable",
+						"cost": {"input": 99, "output": 100}
 					}
 				}
 			}
@@ -38,10 +43,10 @@ func TestUpdateModelPricesFromModelsDevReplacesCurrentPrices(t *testing.T) {
 	}))
 	defer server.Close()
 
-	svc := newModelPriceOnlyAdminService(repo)
+	svc := newModelPriceOnlyAdminService(repo, "gpt-remote")
 	svc.SetModelsDevPricingSource(server.URL, server.Client())
 
-	prices, err := svc.UpdateModelPricesFromModelsDev(context.Background())
+	prices, err := svc.UpdateModelPricesFromModelsDev(context.Background(), domain.DefaultTenantID)
 	if err != nil {
 		t.Fatalf("UpdateModelPricesFromModelsDev() error = %v", err)
 	}
@@ -50,6 +55,9 @@ func TestUpdateModelPricesFromModelsDevReplacesCurrentPrices(t *testing.T) {
 	}
 	if repo.hasModel("old-model") {
 		t.Fatal("old-model should have been wiped before models.dev prices were inserted")
+	}
+	if repo.hasModel("gpt-unavailable") {
+		t.Fatal("gpt-unavailable should have been skipped because it is not in the available model list")
 	}
 
 	remote := repo.mustModel(t, "gpt-remote")
@@ -72,21 +80,24 @@ func TestUpdateModelPricesFromModelsDevFallsBackToBuiltInDefaults(t *testing.T) 
 	}))
 	defer server.Close()
 
-	svc := newModelPriceOnlyAdminService(repo)
+	svc := newModelPriceOnlyAdminService(repo, "claude-sonnet-4-5")
 	svc.SetModelsDevPricingSource(server.URL, server.Client())
 
-	prices, err := svc.UpdateModelPricesFromModelsDev(context.Background())
+	prices, err := svc.UpdateModelPricesFromModelsDev(context.Background(), domain.DefaultTenantID)
 	if err != nil {
 		t.Fatalf("UpdateModelPricesFromModelsDev() fallback error = %v", err)
 	}
-	if len(prices) != len(pricing.DefaultPriceTable().All()) {
-		t.Fatalf("fallback prices count = %d, want %d", len(prices), len(pricing.DefaultPriceTable().All()))
+	if len(prices) != 1 {
+		t.Fatalf("fallback prices count = %d, want 1 accessible default", len(prices))
 	}
 	if repo.hasModel("old-model") {
 		t.Fatal("old-model should have been wiped before fallback defaults were inserted")
 	}
 	if !repo.hasModel("claude-sonnet-4-5") {
 		t.Fatal("expected hardcoded default price claude-sonnet-4-5 after fallback")
+	}
+	if repo.hasModel("gpt-5.4") {
+		t.Fatal("did not expect inaccessible built-in default price gpt-5.4 after fallback")
 	}
 }
 
@@ -107,10 +118,10 @@ func TestResetModelPricesToDefaultsWipesModelsDevPrices(t *testing.T) {
 	}))
 	defer server.Close()
 
-	svc := newModelPriceOnlyAdminService(repo)
+	svc := newModelPriceOnlyAdminService(repo, "gpt-remote-only")
 	svc.SetModelsDevPricingSource(server.URL, server.Client())
 
-	if _, err := svc.UpdateModelPricesFromModelsDev(context.Background()); err != nil {
+	if _, err := svc.UpdateModelPricesFromModelsDev(context.Background(), domain.DefaultTenantID); err != nil {
 		t.Fatalf("UpdateModelPricesFromModelsDev() error = %v", err)
 	}
 	if !repo.hasModel("gpt-remote-only") {
@@ -132,9 +143,210 @@ func TestResetModelPricesToDefaultsWipesModelsDevPrices(t *testing.T) {
 	}
 }
 
-func newModelPriceOnlyAdminService(repo *adminServiceModelPriceRepo) *AdminService {
-	return NewAdminService(
-		nil,
+func TestUpdateModelPricesFromModelsDevRequiresAvailableModels(t *testing.T) {
+	repo := newAdminServiceModelPriceRepo([]*domain.ModelPrice{{
+		ModelID:          "old-model",
+		InputPriceMicro:  1,
+		OutputPriceMicro: 2,
+	}})
+	svc := newModelPriceOnlyAdminService(repo)
+
+	_, err := svc.UpdateModelPricesFromModelsDev(context.Background(), domain.DefaultTenantID)
+	if err == nil {
+		t.Fatal("expected update to fail when no accessible models are available")
+	}
+	if !repo.hasModel("old-model") {
+		t.Fatal("old prices should be preserved when update is skipped")
+	}
+}
+
+func TestUpdateModelPricesFromModelsDevUsesResponseModelAvailability(t *testing.T) {
+	repo := newAdminServiceModelPriceRepo([]*domain.ModelPrice{{
+		ModelID:          "old-model",
+		InputPriceMicro:  1,
+		OutputPriceMicro: 2,
+	}})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"openai": {
+				"models": {
+					"gpt-response-model": {
+						"id": "gpt-response-model",
+						"cost": {"input": 1, "output": 2}
+					},
+					"gpt-not-advertised": {
+						"id": "gpt-not-advertised",
+						"cost": {"input": 3, "output": 4}
+					}
+				}
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	svc := newModelPriceOnlyAdminService(repo)
+	svc.responseModelRepo = fakeAdminServiceResponseModelRepo{names: []string{"gpt-response-model"}}
+	svc.SetModelsDevPricingSource(server.URL, server.Client())
+
+	prices, err := svc.UpdateModelPricesFromModelsDev(context.Background(), domain.DefaultTenantID)
+	if err != nil {
+		t.Fatalf("UpdateModelPricesFromModelsDev() error = %v", err)
+	}
+	if len(prices) != 1 {
+		t.Fatalf("updated price count = %d, want 1", len(prices))
+	}
+	if !repo.hasModel("gpt-response-model") {
+		t.Fatal("expected response-model availability to feed pricing update")
+	}
+	if repo.hasModel("gpt-not-advertised") {
+		t.Fatal("did not expect non-advertised model to be imported")
+	}
+}
+
+func TestUpdateModelPricesFromModelsDevUsesCLIProxyRegistryAvailability(t *testing.T) {
+	repo := newAdminServiceModelPriceRepo([]*domain.ModelPrice{{
+		ModelID:          "old-model",
+		InputPriceMicro:  1,
+		OutputPriceMicro: 2,
+	}})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"openai": {
+				"models": {
+					"gpt-registry-model": {
+						"id": "gpt-registry-model",
+						"cost": {"input": 1, "output": 2}
+					},
+					"gpt-not-advertised": {
+						"id": "gpt-not-advertised",
+						"cost": {"input": 3, "output": 4}
+					}
+				}
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	svc := newModelPriceOnlyAdminService(repo)
+	svc.SetModelAvailabilityRegistry(fakeModelAvailabilityRegistry{
+		handlerModels: map[string][]map[string]any{
+			"openai": {{"id": "gpt-registry-model"}},
+		},
+	})
+	svc.SetModelsDevPricingSource(server.URL, server.Client())
+
+	prices, err := svc.UpdateModelPricesFromModelsDev(context.Background(), domain.DefaultTenantID)
+	if err != nil {
+		t.Fatalf("UpdateModelPricesFromModelsDev() error = %v", err)
+	}
+	if len(prices) != 1 {
+		t.Fatalf("updated price count = %d, want 1", len(prices))
+	}
+	if !repo.hasModel("gpt-registry-model") {
+		t.Fatal("expected CLIProxyAPI registry availability to feed pricing update")
+	}
+	if repo.hasModel("gpt-not-advertised") {
+		t.Fatal("did not expect non-advertised model to be imported")
+	}
+}
+
+func TestUpdateModelPricesFromModelsDevUsesGlobalCLIProxyRegistryAvailability(t *testing.T) {
+	const clientID = "admin-service-global-registry-test"
+	registry := cliproxy.GlobalModelRegistry()
+	registry.RegisterClient(clientID, "codex", []*cliproxy.ModelInfo{{ID: "gpt-global-registry-model"}})
+	t.Cleanup(func() { registry.UnregisterClient(clientID) })
+
+	repo := newAdminServiceModelPriceRepo([]*domain.ModelPrice{{
+		ModelID:          "old-model",
+		InputPriceMicro:  1,
+		OutputPriceMicro: 2,
+	}})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"openai": {
+				"models": {
+					"gpt-global-registry-model": {
+						"id": "gpt-global-registry-model",
+						"cost": {"input": 1, "output": 2}
+					}
+				}
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	svc := newModelPriceOnlyAdminService(repo)
+	svc.modelRegistry = nil
+	svc.SetModelsDevPricingSource(server.URL, server.Client())
+
+	prices, err := svc.UpdateModelPricesFromModelsDev(context.Background(), domain.DefaultTenantID)
+	if err != nil {
+		t.Fatalf("UpdateModelPricesFromModelsDev() error = %v", err)
+	}
+	if len(prices) != 1 {
+		t.Fatalf("updated price count = %d, want 1", len(prices))
+	}
+	if !repo.hasModel("gpt-global-registry-model") {
+		t.Fatal("expected global CLIProxyAPI registry availability to feed pricing update")
+	}
+}
+
+func TestUpdateModelPricesFromModelsDevKeepsTenantAllAvailability(t *testing.T) {
+	repo := newAdminServiceModelPriceRepo([]*domain.ModelPrice{{
+		ModelID:          "old-model",
+		InputPriceMicro:  1,
+		OutputPriceMicro: 2,
+	}})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"openai": {
+				"models": {
+					"gpt-tenant-all-mapping": {
+						"id": "gpt-tenant-all-mapping",
+						"cost": {"input": 1, "output": 2}
+					}
+				}
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	svc := newModelPriceOnlyAdminService(repo)
+	svc.modelMappingRepo = fakeAdminServiceModelMappingRepo{mappings: []*domain.ModelMapping{{
+		TenantID: domain.TenantIDAll,
+		Pattern:  "gpt-tenant-all-*",
+		Target:   "gpt-tenant-all-mapping",
+	}}}
+	svc.SetModelsDevPricingSource(server.URL, server.Client())
+
+	prices, err := svc.UpdateModelPricesFromModelsDev(context.Background(), domain.TenantIDAll)
+	if err != nil {
+		t.Fatalf("UpdateModelPricesFromModelsDev() error = %v", err)
+	}
+	if len(prices) != 1 {
+		t.Fatalf("updated price count = %d, want 1", len(prices))
+	}
+	if !repo.hasModel("gpt-tenant-all-mapping") {
+		t.Fatal("expected tenant-all model availability to feed pricing update")
+	}
+}
+
+func newModelPriceOnlyAdminService(repo *adminServiceModelPriceRepo, supportModels ...string) *AdminService {
+	providerRepo := &adminServiceProviderRepo{}
+	if len(supportModels) > 0 {
+		providerRepo.providers = []*domain.Provider{{
+			TenantID:      domain.DefaultTenantID,
+			Type:          "custom",
+			Name:          "available-models",
+			SupportModels: append([]string(nil), supportModels...),
+		}}
+	}
+	svc := NewAdminService(
+		providerRepo,
 		nil,
 		nil,
 		nil,
@@ -155,6 +367,97 @@ func newModelPriceOnlyAdminService(repo *adminServiceModelPriceRepo) *AdminServi
 		nil,
 		nil,
 	)
+	svc.SetModelAvailabilityRegistry(fakeModelAvailabilityRegistry{})
+	return svc
+}
+
+type fakeModelAvailabilityRegistry struct {
+	handlerModels  map[string][]map[string]any
+	providerModels map[string][]*cliproxy.ModelInfo
+}
+
+func (r fakeModelAvailabilityRegistry) GetAvailableModels(handlerType string) []map[string]any {
+	return r.handlerModels[handlerType]
+}
+
+func (r fakeModelAvailabilityRegistry) GetAvailableModelsByProvider(provider string) []*cliproxy.ModelInfo {
+	return r.providerModels[provider]
+}
+
+type adminServiceProviderRepo struct {
+	providers []*domain.Provider
+}
+
+func (r *adminServiceProviderRepo) Create(provider *domain.Provider) error  { return nil }
+func (r *adminServiceProviderRepo) Update(provider *domain.Provider) error  { return nil }
+func (r *adminServiceProviderRepo) Delete(tenantID uint64, id uint64) error { return nil }
+func (r *adminServiceProviderRepo) GetByID(tenantID uint64, id uint64) (*domain.Provider, error) {
+	return nil, domain.ErrNotFound
+}
+func (r *adminServiceProviderRepo) List(tenantID uint64) ([]*domain.Provider, error) {
+	return append([]*domain.Provider(nil), r.providers...), nil
+}
+
+type fakeAdminServiceResponseModelRepo struct {
+	names []string
+}
+
+func (r fakeAdminServiceResponseModelRepo) Upsert(name string) error { return nil }
+func (r fakeAdminServiceResponseModelRepo) BatchUpsert(names []string) error {
+	return nil
+}
+func (r fakeAdminServiceResponseModelRepo) List() ([]*domain.ResponseModel, error) {
+	models := make([]*domain.ResponseModel, 0, len(r.names))
+	for _, name := range r.names {
+		models = append(models, &domain.ResponseModel{Name: name})
+	}
+	return models, nil
+}
+func (r fakeAdminServiceResponseModelRepo) ListNames() ([]string, error) {
+	return append([]string(nil), r.names...), nil
+}
+
+type fakeAdminServiceModelMappingRepo struct {
+	mappings []*domain.ModelMapping
+}
+
+func (r fakeAdminServiceModelMappingRepo) Create(mapping *domain.ModelMapping) error { return nil }
+func (r fakeAdminServiceModelMappingRepo) Update(mapping *domain.ModelMapping) error { return nil }
+func (r fakeAdminServiceModelMappingRepo) Delete(tenantID uint64, id uint64) error   { return nil }
+func (r fakeAdminServiceModelMappingRepo) GetByID(tenantID uint64, id uint64) (*domain.ModelMapping, error) {
+	return nil, domain.ErrNotFound
+}
+func (r fakeAdminServiceModelMappingRepo) List(tenantID uint64) ([]*domain.ModelMapping, error) {
+	return r.filter(tenantID), nil
+}
+func (r fakeAdminServiceModelMappingRepo) ListEnabled(tenantID uint64) ([]*domain.ModelMapping, error) {
+	return r.filter(tenantID), nil
+}
+func (r fakeAdminServiceModelMappingRepo) ListByClientType(tenantID uint64, clientType domain.ClientType) ([]*domain.ModelMapping, error) {
+	return r.filter(tenantID), nil
+}
+func (r fakeAdminServiceModelMappingRepo) ListByQuery(tenantID uint64, query *domain.ModelMappingQuery) ([]*domain.ModelMapping, error) {
+	return r.filter(tenantID), nil
+}
+func (r fakeAdminServiceModelMappingRepo) Count(tenantID uint64) (int, error) {
+	return len(r.filter(tenantID)), nil
+}
+func (r fakeAdminServiceModelMappingRepo) DeleteAll(tenantID uint64) error    { return nil }
+func (r fakeAdminServiceModelMappingRepo) ClearAll(tenantID uint64) error     { return nil }
+func (r fakeAdminServiceModelMappingRepo) SeedDefaults(tenantID uint64) error { return nil }
+func (r fakeAdminServiceModelMappingRepo) filter(tenantID uint64) []*domain.ModelMapping {
+	result := make([]*domain.ModelMapping, 0, len(r.mappings))
+	for _, mapping := range r.mappings {
+		if mapping == nil {
+			continue
+		}
+		if tenantID != domain.TenantIDAll && mapping.TenantID != tenantID {
+			continue
+		}
+		copy := *mapping
+		result = append(result, &copy)
+	}
+	return result
 }
 
 type adminServiceModelPriceRepo struct {

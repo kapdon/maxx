@@ -1124,8 +1124,8 @@
     "createTitle": "Add Model Price",
     "editTitle": "Edit Model Price",
     "confirmDelete": "Are you sure you want to delete this price? This may affect cost calculations.",
-    "updateFromModelsDev": "Update from models.dev",
-    "confirmUpdateFromModelsDev": "Update model prices from models.dev? This will replace all current prices. If models.dev cannot be reached, Maxx will reload the built-in defaults instead.",
+    "updateFromModelsDev": "Update accessible prices",
+    "confirmUpdateFromModelsDev": "Update model prices for models currently advertised by /v1/models? This will replace all current prices. models.dev is used only for those available models; if it cannot be reached, Maxx will reload matching built-in defaults instead.",
     "resetToDefaults": "Reset to Defaults",
     "confirmReset": "Are you sure you want to reset to default prices? This will replace all current prices with the built-in defaults."
   },

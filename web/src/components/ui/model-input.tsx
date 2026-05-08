@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { useModelPrices } from '@/hooks/queries';
+import { useAvailableModels } from '@/hooks/queries';
 
 // 常见模型列表
 const COMMON_MODELS = [
@@ -205,6 +205,15 @@ function mergeModelOptions(models: Model[]): Model[] {
   return merged;
 }
 
+function inferProvider(modelId: string): Model['provider'] {
+  const id = modelId.toLowerCase();
+  if (id.startsWith('claude-')) return 'Claude';
+  if (id.startsWith('gemini-')) return 'Gemini';
+  if (id.startsWith('gpt-') || /^o\d/.test(id) || id.includes('codex')) return 'OpenAI';
+  if (id.includes('llama') || id.includes('mistral') || id.includes('qwen')) return 'NVIDIA';
+  return 'Other';
+}
+
 export function ModelInput({
   value,
   onChange,
@@ -219,17 +228,18 @@ export function ModelInput({
   const [search, setSearch] = useState('');
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const focusedRef = useRef<HTMLButtonElement>(null);
-  const { data: modelPrices } = useModelPrices();
+  const { data: availableModelIds } = useAvailableModels();
 
-  const pricingModels = useMemo<Model[]>(() => {
-    if (providers && providers.length > 0) return [];
-
-    return (modelPrices || []).map((price) => ({
-      id: price.modelId,
-      name: price.modelId,
-      provider: t('modelInput.configuredPricing'),
+  const availableModels = useMemo<Model[]>(() => {
+    const models = (availableModelIds || []).map((id) => ({
+      id,
+      name: id,
+      provider: inferProvider(id),
     }));
-  }, [modelPrices, providers, t]);
+
+    if (!providers || providers.length === 0) return models;
+    return models.filter((model) => providers.includes(model.provider as Provider));
+  }, [availableModelIds, providers]);
 
   // Base models filtered by providers prop
   const baseModels = useMemo(() => {
@@ -237,8 +247,8 @@ export function ModelInput({
       !providers || providers.length === 0
         ? [...COMMON_MODELS]
         : COMMON_MODELS.filter((model) => providers.includes(model.provider));
-    return mergeModelOptions([...staticModels, ...pricingModels]);
-  }, [pricingModels, providers]);
+    return mergeModelOptions([...staticModels, ...availableModels]);
+  }, [availableModels, providers]);
 
   // 过滤和排序模型（支持模糊匹配）
   const filteredModels = useMemo(() => {

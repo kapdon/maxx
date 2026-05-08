@@ -16,6 +16,7 @@ import (
 	"github.com/awsl-project/maxx/internal/adapter/provider"
 	"github.com/awsl-project/maxx/internal/domain"
 	"github.com/awsl-project/maxx/internal/event"
+	"github.com/awsl-project/maxx/internal/modelavailability"
 	"github.com/awsl-project/maxx/internal/payloadoverride"
 	"github.com/awsl-project/maxx/internal/pricing"
 	"github.com/awsl-project/maxx/internal/repository"
@@ -63,6 +64,7 @@ type AdminService struct {
 	usageStatsRepo      repository.UsageStatsRepository
 	responseModelRepo   repository.ResponseModelRepository
 	modelPriceRepo      repository.ModelPriceRepository
+	modelRegistry       modelavailability.Registry
 	serverAddr          string
 	modelsDevPricingURL string
 	modelsDevHTTPClient *http.Client
@@ -129,6 +131,12 @@ func NewAdminService(
 func (s *AdminService) SetModelsDevPricingSource(endpoint string, client *http.Client) {
 	s.modelsDevPricingURL = endpoint
 	s.modelsDevHTTPClient = client
+}
+
+// SetModelAvailabilityRegistry overrides the CLIProxyAPI model registry source.
+// It is intended for tests.
+func (s *AdminService) SetModelAvailabilityRegistry(registry modelavailability.Registry) {
+	s.modelRegistry = registry
 }
 
 // ===== Provider API =====
@@ -1216,22 +1224,41 @@ func (s *AdminService) ResetModelPricesToDefaults() ([]*domain.ModelPrice, error
 	return s.modelPriceRepo.ResetToDefaults()
 }
 
-// UpdateModelPricesFromModelsDev replaces current model prices with models.dev pricing.
-// If models.dev is unreachable or invalid, it falls back to the built-in default_prices.go table.
-func (s *AdminService) UpdateModelPricesFromModelsDev(ctx context.Context) ([]*domain.ModelPrice, error) {
+// UpdateModelPricesFromModelsDev replaces current model prices with models.dev
+// pricing for models that are available from configured/connected accounts.
+// If models.dev is unreachable or invalid, it falls back to the built-in
+// default_prices.go table, still filtered to available models.
+func (s *AdminService) UpdateModelPricesFromModelsDev(ctx context.Context, tenantID uint64) ([]*domain.ModelPrice, error) {
 	if s.modelPriceRepo == nil {
 		return nil, fmt.Errorf("model price repository is not configured")
 	}
 
+	availableModelIDs, err := s.collectAvailableModelIDsForPricing(tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("collect available models: %w", err)
+	}
+	if len(availableModelIDs) == 0 {
+		return nil, fmt.Errorf("no available models found from connected accounts; pricing update skipped")
+	}
+
 	priceTable, err := pricing.FetchModelsDevPriceTable(ctx, s.modelsDevHTTPClient, s.modelsDevPricingURL)
 	if err != nil {
-		log.Printf("[Pricing] Failed to fetch models.dev pricing, falling back to built-in defaults: %v", err)
+		log.Printf("[Pricing] Failed to fetch models.dev pricing, falling back to built-in defaults for %d available models: %v", len(availableModelIDs), err)
 		priceTable = pricing.DefaultPriceTable()
+	}
+
+	priceTable = pricing.FilterPriceTableByModelIDs(priceTable, availableModelIDs)
+	if len(priceTable.Models) == 0 {
+		fallback := pricing.FilterPriceTableByModelIDs(pricing.DefaultPriceTable(), availableModelIDs)
+		if len(fallback.Models) > 0 {
+			log.Printf("[Pricing] models.dev had no prices for %d available models, using %d built-in default prices", len(availableModelIDs), len(fallback.Models))
+			priceTable = fallback
+		}
 	}
 
 	prices := pricing.ConvertToDBPrices(priceTable)
 	if len(prices) == 0 {
-		return nil, fmt.Errorf("pricing source produced no model prices")
+		return nil, fmt.Errorf("pricing sources produced no prices for %d available models", len(availableModelIDs))
 	}
 
 	if err := s.modelPriceRepo.SoftDeleteAll(); err != nil {
@@ -1242,4 +1269,26 @@ func (s *AdminService) UpdateModelPricesFromModelsDev(ctx context.Context) ([]*d
 	}
 
 	return prices, nil
+}
+
+func (s *AdminService) collectAvailableModelIDsForPricing(tenantID uint64) ([]string, error) {
+	source := modelavailability.Source{
+		ResponseModelRepo: s.responseModelRepo,
+		ProviderRepo:      s.providerRepo,
+		ModelMappingRepo:  s.modelMappingRepo,
+		Registry:          s.modelRegistry,
+	}
+	modelIDs, err := source.Collect(tenantID, modelavailability.DefaultCollectOptions())
+	if err == nil {
+		log.Printf(
+			"[Pricing] Collected %d available model IDs for tenant %d (providers=%t responseModels=%t modelMappings=%t registryOverride=%t)",
+			len(modelIDs),
+			tenantID,
+			s.providerRepo != nil,
+			s.responseModelRepo != nil,
+			s.modelMappingRepo != nil,
+			s.modelRegistry != nil,
+		)
+	}
+	return modelIDs, err
 }

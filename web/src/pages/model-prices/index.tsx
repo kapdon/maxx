@@ -480,7 +480,7 @@ export function ModelPricesPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Update from models.dev Confirmation Dialog */}
+      {/* Update accessible model prices Confirmation Dialog */}
       <AlertDialog open={updateConfirmOpen} onOpenChange={setUpdateConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
