@@ -2,6 +2,7 @@ package e2e_test
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -128,14 +129,40 @@ func TestProviderSupportModelsFeedAvailableModels(t *testing.T) {
 	}
 }
 
+func TestProviderModelsEndpointFeedsAvailableModels(t *testing.T) {
+	env := NewTestEnv(t)
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1beta/models" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[{"id":"gpt-provider-endpoint-option"}]}`))
+	}))
+	t.Cleanup(modelServer.Close)
+	createModelsProvider(t, env, modelServer.URL, nil)
+
+	ids := fetchModelIDsForUserAgent(t, env, "codex_cli_rs/0.99.0")
+	if !containsModelID(ids, "gpt-provider-endpoint-option") {
+		t.Fatalf("expected provider /v1/models endpoint model in available model list")
+	}
+}
+
 func createProviderWithSupportModels(t *testing.T, env *TestEnv, supportModels []string) {
+	t.Helper()
+	modelServer := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(modelServer.Close)
+	createModelsProvider(t, env, modelServer.URL, supportModels)
+}
+
+func createModelsProvider(t *testing.T, env *TestEnv, baseURL string, supportModels []string) {
 	t.Helper()
 	provider := map[string]any{
 		"name": "models-provider",
 		"type": "custom",
 		"config": map[string]any{
 			"custom": map[string]any{
-				"baseURL": "https://api.example.com",
+				"baseURL": baseURL,
 				"apiKey":  "sk-test-key",
 			},
 		},

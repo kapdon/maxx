@@ -1233,7 +1233,7 @@ func (s *AdminService) UpdateModelPricesFromModelsDev(ctx context.Context, tenan
 		return nil, fmt.Errorf("model price repository is not configured")
 	}
 
-	availableModelIDs, err := s.collectAvailableModelIDsForPricing(tenantID)
+	availableModelIDs, err := s.collectAvailableModelIDsForPricing(ctx, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("collect available models: %w", err)
 	}
@@ -1271,22 +1271,18 @@ func (s *AdminService) UpdateModelPricesFromModelsDev(ctx context.Context, tenan
 	return prices, nil
 }
 
-func (s *AdminService) collectAvailableModelIDsForPricing(tenantID uint64) ([]string, error) {
+func (s *AdminService) collectAvailableModelIDsForPricing(ctx context.Context, tenantID uint64) ([]string, error) {
 	source := modelavailability.Source{
-		ResponseModelRepo: s.responseModelRepo,
-		ProviderRepo:      s.providerRepo,
-		ModelMappingRepo:  s.modelMappingRepo,
-		Registry:          s.modelRegistry,
+		ProviderRepo: s.providerRepo,
+		Registry:     s.modelRegistry,
 	}
-	modelIDs, err := source.Collect(tenantID, modelavailability.DefaultCollectOptions())
+	modelIDs, err := source.Collect(ctx, tenantID, modelavailability.DefaultCollectOptions())
 	if err == nil {
 		log.Printf(
-			"[Pricing] Collected %d available model IDs for tenant %d (providers=%t responseModels=%t modelMappings=%t registryOverride=%t)",
+			"[Pricing] Collected %d available model IDs for tenant %d (providers=%t registryOverride=%t)",
 			len(modelIDs),
 			tenantID,
 			s.providerRepo != nil,
-			s.responseModelRepo != nil,
-			s.modelMappingRepo != nil,
 			s.modelRegistry != nil,
 		)
 	}

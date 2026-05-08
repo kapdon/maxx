@@ -1,6 +1,10 @@
 package modelavailability
 
 import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/awsl-project/maxx/internal/domain"
@@ -20,7 +24,20 @@ func (r fakeRegistry) GetAvailableModelsByProvider(provider string) []*cliproxy.
 	return r.providerModels[provider]
 }
 
-func TestSourceCollectUsesCLIProxyRegistryAndProviderHints(t *testing.T) {
+func TestSourceCollectUsesCLIProxyRegistryProviderEndpointsAndSupportModels(t *testing.T) {
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1beta/models" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer sk-test" {
+			t.Fatalf("Authorization = %q, want bearer API key", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":[{"id":"gpt-provider-endpoint"},{"name":"models/gemini-from-provider"}]}`)
+	}))
+	defer modelServer.Close()
+
 	source := Source{
 		Registry: fakeRegistry{
 			handlerModels: map[string][]map[string]any{
@@ -35,24 +52,50 @@ func TestSourceCollectUsesCLIProxyRegistryAndProviderHints(t *testing.T) {
 		},
 		ProviderRepo: &fakeAvailabilityProviderRepo{providers: []*domain.Provider{{
 			SupportModels: []string{"claude-provider", "*"},
-			Config: &domain.ProviderConfig{Codex: &domain.ProviderConfigCodex{ModelMapping: map[string]string{
-				"gpt-request": "gpt-mapped",
-			}}},
+			Config: &domain.ProviderConfig{Custom: &domain.ProviderConfigCustom{
+				BaseURL: modelServer.URL,
+				APIKey:  "sk-test",
+				ModelMapping: map[string]string{
+					"gpt-request": "gpt-mapped",
+				},
+			}},
 		}}},
 	}
 
-	names, err := source.Collect(domain.DefaultTenantID, DefaultCollectOptions())
+	names, err := source.Collect(context.Background(), domain.DefaultTenantID, DefaultCollectOptions())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
 
-	for _, want := range []string{"gpt-registry", "gemini-from-name", "gpt-codex-provider", "claude-provider", "gpt-request", "gpt-mapped"} {
+	for _, want := range []string{"gpt-registry", "gemini-from-name", "gpt-codex-provider", "claude-provider", "gpt-provider-endpoint", "gemini-from-provider"} {
 		if !containsName(names, want) {
 			t.Fatalf("expected %q in collected names: %v", want, names)
 		}
 	}
+	if containsName(names, "gpt-mapped") || containsName(names, "gpt-request") {
+		t.Fatalf("did not expect model mappings to advertise availability: %v", names)
+	}
 	if containsName(names, "*") {
 		t.Fatalf("did not expect wildcard in collected names: %v", names)
+	}
+}
+
+func TestSourceCollectDoesNotUseModelMappingsWithoutProviderAvailability(t *testing.T) {
+	source := Source{
+		ProviderRepo: &fakeAvailabilityProviderRepo{providers: []*domain.Provider{{
+			Config: &domain.ProviderConfig{Codex: &domain.ProviderConfigCodex{ModelMapping: map[string]string{
+				"gpt-request": "gpt-mapped",
+			}}},
+		}}},
+		Registry: fakeRegistry{},
+	}
+
+	names, err := source.Collect(context.Background(), domain.DefaultTenantID, DefaultCollectOptions())
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if len(names) != 0 {
+		t.Fatalf("expected no availability from mappings alone, got %v", names)
 	}
 }
 

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -124,12 +125,12 @@ func TestCollectModelNames(t *testing.T) {
 	}
 
 	handler := NewModelsHandler(responseRepo, providerRepo, mappingRepo, nil)
-	names, err := handler.collectModelNames(0)
+	names, err := handler.collectModelNames(context.Background(), 0)
 	if err != nil {
 		t.Fatalf("collectModelNames error: %v", err)
 	}
 
-	want := []string{"gpt-1", "gpt-2", "gpt-3", "gpt-4", "gpt-4o", "gpt-5"}
+	want := []string{"gpt-3"}
 	sort.Strings(want)
 	if len(names) != len(want) {
 		t.Fatalf("model count = %d, want %d", len(names), len(want))
@@ -143,7 +144,8 @@ func TestCollectModelNames(t *testing.T) {
 
 func TestModelsHandlerFormats(t *testing.T) {
 	responseRepo := &fakeResponseModelRepo{names: []string{"gpt-1"}}
-	handler := NewModelsHandler(responseRepo, nil, nil, nil)
+	providerRepo := &fakeProviderRepo{providers: []*domain.Provider{{SupportModels: []string{"gpt-1"}}}}
+	handler := NewModelsHandler(responseRepo, providerRepo, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("User-Agent", "claude-cli/2.0")

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -46,9 +47,9 @@ func (h *ModelsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var names []string
 	var err error
 	if isGeminiModels {
-		names, err = h.collectModelNames(tenantID)
+		names, err = h.collectModelNames(r.Context(), tenantID)
 	} else {
-		names, err = h.collectModelNamesForUserAgent(tenantID, userAgent)
+		names, err = h.collectModelNamesForUserAgent(r.Context(), tenantID, userAgent)
 	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -76,17 +77,15 @@ func isGeminiModelsPath(path string) bool {
 	return path == "/v1beta/models"
 }
 
-func (h *ModelsHandler) collectModelNames(tenantID uint64) ([]string, error) {
-	return h.collectModelNamesForUserAgent(tenantID, "")
+func (h *ModelsHandler) collectModelNames(ctx context.Context, tenantID uint64) ([]string, error) {
+	return h.collectModelNamesForUserAgent(ctx, tenantID, "")
 }
 
-func (h *ModelsHandler) collectModelNamesForUserAgent(tenantID uint64, _ string) ([]string, error) {
+func (h *ModelsHandler) collectModelNamesForUserAgent(ctx context.Context, tenantID uint64, _ string) ([]string, error) {
 	source := modelavailability.Source{
-		ResponseModelRepo: h.responseModelRepo,
-		ProviderRepo:      h.providerRepo,
-		ModelMappingRepo:  h.modelMappingRepo,
+		ProviderRepo: h.providerRepo,
 	}
-	return source.Collect(tenantID, modelavailability.DefaultCollectOptions())
+	return source.Collect(ctx, tenantID, modelavailability.DefaultCollectOptions())
 }
 
 func buildOpenAIModelsResponse(names []string) map[string]interface{} {

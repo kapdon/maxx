@@ -160,19 +160,32 @@ func TestUpdateModelPricesFromModelsDevRequiresAvailableModels(t *testing.T) {
 	}
 }
 
-func TestUpdateModelPricesFromModelsDevUsesResponseModelAvailability(t *testing.T) {
+func TestUpdateModelPricesFromModelsDevUsesProviderModelEndpointAvailability(t *testing.T) {
 	repo := newAdminServiceModelPriceRepo([]*domain.ModelPrice{{
 		ModelID:          "old-model",
 		InputPriceMicro:  1,
 		OutputPriceMicro: 2,
 	}})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	modelsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1beta/models" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer sk-provider" {
+			t.Fatalf("Authorization = %q, want provider bearer token", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-provider-endpoint"}]}`))
+	}))
+	defer modelsServer.Close()
+
+	pricingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"openai": {
 				"models": {
-					"gpt-response-model": {
-						"id": "gpt-response-model",
+					"gpt-provider-endpoint": {
+						"id": "gpt-provider-endpoint",
 						"cost": {"input": 1, "output": 2}
 					},
 					"gpt-not-advertised": {
@@ -183,11 +196,19 @@ func TestUpdateModelPricesFromModelsDevUsesResponseModelAvailability(t *testing.
 			}
 		}`))
 	}))
-	defer server.Close()
+	defer pricingServer.Close()
 
 	svc := newModelPriceOnlyAdminService(repo)
-	svc.responseModelRepo = fakeAdminServiceResponseModelRepo{names: []string{"gpt-response-model"}}
-	svc.SetModelsDevPricingSource(server.URL, server.Client())
+	svc.providerRepo = &adminServiceProviderRepo{providers: []*domain.Provider{{
+		TenantID: domain.DefaultTenantID,
+		Type:     "custom",
+		Name:     "cliproxy-provider",
+		Config: &domain.ProviderConfig{Custom: &domain.ProviderConfigCustom{
+			BaseURL: modelsServer.URL,
+			APIKey:  "sk-provider",
+		}},
+	}}}
+	svc.SetModelsDevPricingSource(pricingServer.URL, pricingServer.Client())
 
 	prices, err := svc.UpdateModelPricesFromModelsDev(context.Background(), domain.DefaultTenantID)
 	if err != nil {
@@ -196,8 +217,8 @@ func TestUpdateModelPricesFromModelsDevUsesResponseModelAvailability(t *testing.
 	if len(prices) != 1 {
 		t.Fatalf("updated price count = %d, want 1", len(prices))
 	}
-	if !repo.hasModel("gpt-response-model") {
-		t.Fatal("expected response-model availability to feed pricing update")
+	if !repo.hasModel("gpt-provider-endpoint") {
+		t.Fatal("expected provider models endpoint availability to feed pricing update")
 	}
 	if repo.hasModel("gpt-not-advertised") {
 		t.Fatal("did not expect non-advertised model to be imported")
@@ -294,7 +315,7 @@ func TestUpdateModelPricesFromModelsDevUsesGlobalCLIProxyRegistryAvailability(t 
 	}
 }
 
-func TestUpdateModelPricesFromModelsDevKeepsTenantAllAvailability(t *testing.T) {
+func TestUpdateModelPricesFromModelsDevKeepsTenantAllProviderAvailability(t *testing.T) {
 	repo := newAdminServiceModelPriceRepo([]*domain.ModelPrice{{
 		ModelID:          "old-model",
 		InputPriceMicro:  1,
@@ -316,10 +337,13 @@ func TestUpdateModelPricesFromModelsDevKeepsTenantAllAvailability(t *testing.T) 
 	defer server.Close()
 
 	svc := newModelPriceOnlyAdminService(repo)
-	svc.modelMappingRepo = fakeAdminServiceModelMappingRepo{mappings: []*domain.ModelMapping{{
+	svc.providerRepo = &adminServiceProviderRepo{providers: []*domain.Provider{{
 		TenantID: domain.TenantIDAll,
-		Pattern:  "gpt-tenant-all-*",
-		Target:   "gpt-tenant-all-mapping",
+		Type:     "custom",
+		Name:     "global-provider",
+		SupportModels: []string{
+			"gpt-tenant-all-mapping",
+		},
 	}}}
 	svc.SetModelsDevPricingSource(server.URL, server.Client())
 
@@ -395,69 +419,18 @@ func (r *adminServiceProviderRepo) GetByID(tenantID uint64, id uint64) (*domain.
 	return nil, domain.ErrNotFound
 }
 func (r *adminServiceProviderRepo) List(tenantID uint64) ([]*domain.Provider, error) {
-	return append([]*domain.Provider(nil), r.providers...), nil
-}
-
-type fakeAdminServiceResponseModelRepo struct {
-	names []string
-}
-
-func (r fakeAdminServiceResponseModelRepo) Upsert(name string) error { return nil }
-func (r fakeAdminServiceResponseModelRepo) BatchUpsert(names []string) error {
-	return nil
-}
-func (r fakeAdminServiceResponseModelRepo) List() ([]*domain.ResponseModel, error) {
-	models := make([]*domain.ResponseModel, 0, len(r.names))
-	for _, name := range r.names {
-		models = append(models, &domain.ResponseModel{Name: name})
-	}
-	return models, nil
-}
-func (r fakeAdminServiceResponseModelRepo) ListNames() ([]string, error) {
-	return append([]string(nil), r.names...), nil
-}
-
-type fakeAdminServiceModelMappingRepo struct {
-	mappings []*domain.ModelMapping
-}
-
-func (r fakeAdminServiceModelMappingRepo) Create(mapping *domain.ModelMapping) error { return nil }
-func (r fakeAdminServiceModelMappingRepo) Update(mapping *domain.ModelMapping) error { return nil }
-func (r fakeAdminServiceModelMappingRepo) Delete(tenantID uint64, id uint64) error   { return nil }
-func (r fakeAdminServiceModelMappingRepo) GetByID(tenantID uint64, id uint64) (*domain.ModelMapping, error) {
-	return nil, domain.ErrNotFound
-}
-func (r fakeAdminServiceModelMappingRepo) List(tenantID uint64) ([]*domain.ModelMapping, error) {
-	return r.filter(tenantID), nil
-}
-func (r fakeAdminServiceModelMappingRepo) ListEnabled(tenantID uint64) ([]*domain.ModelMapping, error) {
-	return r.filter(tenantID), nil
-}
-func (r fakeAdminServiceModelMappingRepo) ListByClientType(tenantID uint64, clientType domain.ClientType) ([]*domain.ModelMapping, error) {
-	return r.filter(tenantID), nil
-}
-func (r fakeAdminServiceModelMappingRepo) ListByQuery(tenantID uint64, query *domain.ModelMappingQuery) ([]*domain.ModelMapping, error) {
-	return r.filter(tenantID), nil
-}
-func (r fakeAdminServiceModelMappingRepo) Count(tenantID uint64) (int, error) {
-	return len(r.filter(tenantID)), nil
-}
-func (r fakeAdminServiceModelMappingRepo) DeleteAll(tenantID uint64) error    { return nil }
-func (r fakeAdminServiceModelMappingRepo) ClearAll(tenantID uint64) error     { return nil }
-func (r fakeAdminServiceModelMappingRepo) SeedDefaults(tenantID uint64) error { return nil }
-func (r fakeAdminServiceModelMappingRepo) filter(tenantID uint64) []*domain.ModelMapping {
-	result := make([]*domain.ModelMapping, 0, len(r.mappings))
-	for _, mapping := range r.mappings {
-		if mapping == nil {
+	result := make([]*domain.Provider, 0, len(r.providers))
+	for _, provider := range r.providers {
+		if provider == nil {
 			continue
 		}
-		if tenantID != domain.TenantIDAll && mapping.TenantID != tenantID {
+		if tenantID != domain.TenantIDAll && provider.TenantID != tenantID {
 			continue
 		}
-		copy := *mapping
+		copy := *provider
 		result = append(result, &copy)
 	}
-	return result
+	return result, nil
 }
 
 type adminServiceModelPriceRepo struct {
