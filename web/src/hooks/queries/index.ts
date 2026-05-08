@@ -170,6 +170,7 @@ export {
   useCreateModelPrice,
   useUpdateModelPrice,
   useDeleteModelPrice,
+  useUpdateModelPricesFromModelsDev,
   useResetModelPricesToDefaults,
 } from './use-model-prices';
 

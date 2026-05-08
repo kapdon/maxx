@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base32"
 	"encoding/hex"
@@ -63,6 +64,8 @@ type AdminService struct {
 	responseModelRepo   repository.ResponseModelRepository
 	modelPriceRepo      repository.ModelPriceRepository
 	serverAddr          string
+	modelsDevPricingURL string
+	modelsDevHTTPClient *http.Client
 	adapterRefresher    ProviderAdapterRefresher
 	broadcaster         event.Broadcaster
 	pprofReloader       PprofReloader
@@ -114,10 +117,18 @@ func NewAdminService(
 		responseModelRepo:   responseModelRepo,
 		modelPriceRepo:      modelPriceRepo,
 		serverAddr:          serverAddr,
+		modelsDevPricingURL: pricing.ModelsDevDefaultURL,
+		modelsDevHTTPClient: &http.Client{Timeout: 20 * time.Second},
 		adapterRefresher:    adapterRefresher,
 		broadcaster:         broadcaster,
 		pprofReloader:       pprofReloader,
 	}
+}
+
+// SetModelsDevPricingSource overrides the models.dev source. It is intended for tests.
+func (s *AdminService) SetModelsDevPricingSource(endpoint string, client *http.Client) {
+	s.modelsDevPricingURL = endpoint
+	s.modelsDevHTTPClient = client
 }
 
 // ===== Provider API =====
@@ -1203,4 +1214,32 @@ func (s *AdminService) GetModelPriceHistory(modelID string) ([]*domain.ModelPric
 // ResetModelPricesToDefaults resets all model prices to defaults (soft deletes existing)
 func (s *AdminService) ResetModelPricesToDefaults() ([]*domain.ModelPrice, error) {
 	return s.modelPriceRepo.ResetToDefaults()
+}
+
+// UpdateModelPricesFromModelsDev replaces current model prices with models.dev pricing.
+// If models.dev is unreachable or invalid, it falls back to the built-in default_prices.go table.
+func (s *AdminService) UpdateModelPricesFromModelsDev(ctx context.Context) ([]*domain.ModelPrice, error) {
+	if s.modelPriceRepo == nil {
+		return nil, fmt.Errorf("model price repository is not configured")
+	}
+
+	priceTable, err := pricing.FetchModelsDevPriceTable(ctx, s.modelsDevHTTPClient, s.modelsDevPricingURL)
+	if err != nil {
+		log.Printf("[Pricing] Failed to fetch models.dev pricing, falling back to built-in defaults: %v", err)
+		priceTable = pricing.DefaultPriceTable()
+	}
+
+	prices := pricing.ConvertToDBPrices(priceTable)
+	if len(prices) == 0 {
+		return nil, fmt.Errorf("pricing source produced no model prices")
+	}
+
+	if err := s.modelPriceRepo.SoftDeleteAll(); err != nil {
+		return nil, fmt.Errorf("clear current model prices: %w", err)
+	}
+	if err := s.modelPriceRepo.BatchCreate(prices); err != nil {
+		return nil, fmt.Errorf("insert updated model prices: %w", err)
+	}
+
+	return prices, nil
 }

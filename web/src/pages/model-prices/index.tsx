@@ -28,10 +28,11 @@ import {
   useCreateModelPrice,
   useUpdateModelPrice,
   useDeleteModelPrice,
+  useUpdateModelPricesFromModelsDev,
   useResetModelPricesToDefaults,
 } from '@/hooks/queries';
 import type { ModelPrice, ModelPriceInput } from '@/lib/transport/types';
-import { DollarSign, Plus, Trash2, Pencil, RotateCcw } from 'lucide-react';
+import { DollarSign, Plus, Trash2, Pencil, RotateCcw, DownloadCloud } from 'lucide-react';
 
 // Helper to format micro USD price to display format (e.g., $3.00 / M tokens)
 function formatMicroPrice(microUsd: number): string {
@@ -116,6 +117,7 @@ export function ModelPricesPage() {
   const createPrice = useCreateModelPrice();
   const updatePrice = useUpdateModelPrice();
   const deletePrice = useDeleteModelPrice();
+  const updatePricesFromModelsDev = useUpdateModelPricesFromModelsDev();
   const resetPrices = useResetModelPricesToDefaults();
   const canManagePrices = user?.role === 'admin';
 
@@ -123,6 +125,7 @@ export function ModelPricesPage() {
   const [editingPrice, setEditingPrice] = useState<ModelPrice | null>(null);
   const [formData, setFormData] = useState<PriceFormData>(defaultFormData);
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+  const [updateConfirmOpen, setUpdateConfirmOpen] = useState(false);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
 
   const handleOpenCreate = () => {
@@ -167,10 +170,17 @@ export function ModelPricesPage() {
     setResetConfirmOpen(false);
   };
 
+  const handleUpdateConfirm = async () => {
+    if (!canManagePrices) return;
+    await updatePricesFromModelsDev.mutateAsync();
+    setUpdateConfirmOpen(false);
+  };
+
   const isPending =
     createPrice.isPending ||
     updatePrice.isPending ||
     deletePrice.isPending ||
+    updatePricesFromModelsDev.isPending ||
     resetPrices.isPending;
 
   if (isLoading) return null;
@@ -187,6 +197,15 @@ export function ModelPricesPage() {
         actions={
           canManagePrices ? (
             <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setUpdateConfirmOpen(true)}
+                disabled={isPending}
+              >
+                <DownloadCloud className="h-4 w-4 mr-1" />
+                {t('modelPrices.updateFromModelsDev')}
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -456,6 +475,24 @@ export function ModelPricesPage() {
             <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction variant="destructive" onClick={handleDeleteConfirm}>
               {t('common.delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Update from models.dev Confirmation Dialog */}
+      <AlertDialog open={updateConfirmOpen} onOpenChange={setUpdateConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('common.confirm')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('modelPrices.confirmUpdateFromModelsDev')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleUpdateConfirm}>
+              {t('modelPrices.updateFromModelsDev')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

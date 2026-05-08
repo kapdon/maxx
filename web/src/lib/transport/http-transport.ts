@@ -1076,6 +1076,11 @@ export class HttpTransport implements Transport {
     await this.adminClient.delete(`/model-prices/${id}`);
   }
 
+  async updateModelPricesFromModelsDev(): Promise<ModelPrice[]> {
+    const { data } = await this.adminClient.post<ModelPrice[]>('/model-prices/update');
+    return this.expectArray<ModelPrice>(data, '/model-prices/update');
+  }
+
   async resetModelPricesToDefaults(): Promise<ModelPrice[]> {
     const { data } = await this.adminClient.post<ModelPrice[]>('/model-prices/reset');
     return data;

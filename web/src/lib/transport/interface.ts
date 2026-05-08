@@ -285,6 +285,7 @@ export interface Transport {
   createModelPrice(data: ModelPriceInput): Promise<ModelPrice>;
   updateModelPrice(id: number, data: ModelPriceInput): Promise<ModelPrice>;
   deleteModelPrice(id: number): Promise<void>;
+  updateModelPricesFromModelsDev(): Promise<ModelPrice[]>;
   resetModelPricesToDefaults(): Promise<ModelPrice[]>;
 
   // ===== 实时订阅 =====

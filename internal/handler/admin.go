@@ -1772,6 +1772,10 @@ func (h *AdminHandler) handleModelPrices(w http.ResponseWriter, r *http.Request,
 		h.handleModelPricesReset(w, r)
 		return
 	}
+	if strings.HasSuffix(path, "/update") && r.Method == http.MethodPost {
+		h.handleModelPricesUpdate(w, r)
+		return
+	}
 
 	switch r.Method {
 	case http.MethodGet:
@@ -1845,6 +1849,18 @@ func (h *AdminHandler) handleModelPrices(w http.ResponseWriter, r *http.Request,
 // handleModelPricesReset handles POST /admin/model-prices/reset
 func (h *AdminHandler) handleModelPricesReset(w http.ResponseWriter, r *http.Request) {
 	prices, err := h.svc.ResetModelPricesToDefaults()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	// Refresh calculator cache
+	pricing.GlobalCalculator().LoadFromDatabase(prices)
+	writeJSON(w, http.StatusOK, prices)
+}
+
+// handleModelPricesUpdate handles POST /admin/model-prices/update
+func (h *AdminHandler) handleModelPricesUpdate(w http.ResponseWriter, r *http.Request) {
+	prices, err := h.svc.UpdateModelPricesFromModelsDev(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
