@@ -40,26 +40,29 @@ func TestSourceCollectUsesCLIProxyRegistryProviderEndpointsAndSupportModels(t *t
 
 	source := Source{
 		Registry: fakeRegistry{
-			handlerModels: map[string][]map[string]any{
-				"openai": {
-					{"id": "gpt-registry"},
-					{"name": "models/gemini-from-name"},
-				},
-			},
 			providerModels: map[string][]*cliproxy.ModelInfo{
 				"codex": {&cliproxy.ModelInfo{ID: "gpt-codex-provider"}},
 			},
 		},
-		ProviderRepo: &fakeAvailabilityProviderRepo{providers: []*domain.Provider{{
-			SupportModels: []string{"claude-provider", "*"},
-			Config: &domain.ProviderConfig{Custom: &domain.ProviderConfigCustom{
-				BaseURL: modelServer.URL,
-				APIKey:  "sk-test",
-				ModelMapping: map[string]string{
-					"gpt-request": "gpt-mapped",
-				},
-			}},
-		}}},
+		ProviderRepo: &fakeAvailabilityProviderRepo{providers: []*domain.Provider{
+			{
+				Type: "codex",
+				Config: &domain.ProviderConfig{Codex: &domain.ProviderConfigCodex{
+					UseCLIProxyAPI: true,
+					ModelMapping: map[string]string{
+						"gpt-request": "gpt-mapped",
+					},
+				}},
+			},
+			{
+				Type:          "custom",
+				SupportModels: []string{"claude-provider", "*"},
+				Config: &domain.ProviderConfig{Custom: &domain.ProviderConfigCustom{
+					BaseURL: modelServer.URL,
+					APIKey:  "sk-test",
+				}},
+			},
+		}},
 	}
 
 	names, err := source.Collect(context.Background(), domain.DefaultTenantID, DefaultCollectOptions())
@@ -67,7 +70,7 @@ func TestSourceCollectUsesCLIProxyRegistryProviderEndpointsAndSupportModels(t *t
 		t.Fatalf("Collect() error = %v", err)
 	}
 
-	for _, want := range []string{"gpt-registry", "gemini-from-name", "gpt-codex-provider", "claude-provider", "gpt-provider-endpoint", "gemini-from-provider"} {
+	for _, want := range []string{"gpt-codex-provider", "claude-provider", "gpt-provider-endpoint", "gemini-from-provider"} {
 		if !containsName(names, want) {
 			t.Fatalf("expected %q in collected names: %v", want, names)
 		}
@@ -80,9 +83,26 @@ func TestSourceCollectUsesCLIProxyRegistryProviderEndpointsAndSupportModels(t *t
 	}
 }
 
+func TestSourceCollectDoesNotUseCLIProxyRegistryWithoutProviders(t *testing.T) {
+	source := Source{
+		Registry: fakeRegistry{providerModels: map[string][]*cliproxy.ModelInfo{
+			"codex": {&cliproxy.ModelInfo{ID: "gpt-registry-without-provider"}},
+		}},
+	}
+
+	names, err := source.Collect(context.Background(), domain.DefaultTenantID, DefaultCollectOptions())
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if len(names) != 0 {
+		t.Fatalf("expected no availability without configured providers, got %v", names)
+	}
+}
+
 func TestSourceCollectDoesNotUseModelMappingsWithoutProviderAvailability(t *testing.T) {
 	source := Source{
 		ProviderRepo: &fakeAvailabilityProviderRepo{providers: []*domain.Provider{{
+			Type: "codex",
 			Config: &domain.ProviderConfig{Codex: &domain.ProviderConfigCodex{ModelMapping: map[string]string{
 				"gpt-request": "gpt-mapped",
 			}}},
@@ -96,6 +116,20 @@ func TestSourceCollectDoesNotUseModelMappingsWithoutProviderAvailability(t *test
 	}
 	if len(names) != 0 {
 		t.Fatalf("expected no availability from mappings alone, got %v", names)
+	}
+}
+
+func TestProviderModelEndpointURLsRespectVersionedBaseURL(t *testing.T) {
+	baseURL := "https://provider.example.test/openai/v1"
+	got := modelEndpointURLs(baseURL)
+	want := []string{"https://provider.example.test/openai/v1/models"}
+	if len(got) != len(want) {
+		t.Fatalf("endpoint count = %d, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("endpoint[%d] = %q, want %q", i, got[i], want[i])
+		}
 	}
 }
 

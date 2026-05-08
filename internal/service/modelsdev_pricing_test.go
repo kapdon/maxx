@@ -251,9 +251,16 @@ func TestUpdateModelPricesFromModelsDevUsesCLIProxyRegistryAvailability(t *testi
 	defer server.Close()
 
 	svc := newModelPriceOnlyAdminService(repo)
+	svc.providerRepo = &adminServiceProviderRepo{providers: []*domain.Provider{{
+		TenantID: domain.DefaultTenantID,
+		Type:     "codex",
+		Config: &domain.ProviderConfig{Codex: &domain.ProviderConfigCodex{
+			UseCLIProxyAPI: true,
+		}},
+	}}}
 	svc.SetModelAvailabilityRegistry(fakeModelAvailabilityRegistry{
-		handlerModels: map[string][]map[string]any{
-			"openai": {{"id": "gpt-registry-model"}},
+		providerModels: map[string][]*cliproxy.ModelInfo{
+			"codex": {{ID: "gpt-registry-model"}},
 		},
 	})
 	svc.SetModelsDevPricingSource(server.URL, server.Client())
@@ -300,6 +307,13 @@ func TestUpdateModelPricesFromModelsDevUsesGlobalCLIProxyRegistryAvailability(t 
 	defer server.Close()
 
 	svc := newModelPriceOnlyAdminService(repo)
+	svc.providerRepo = &adminServiceProviderRepo{providers: []*domain.Provider{{
+		TenantID: domain.DefaultTenantID,
+		Type:     "codex",
+		Config: &domain.ProviderConfig{Codex: &domain.ProviderConfigCodex{
+			UseCLIProxyAPI: true,
+		}},
+	}}}
 	svc.modelRegistry = nil
 	svc.SetModelsDevPricingSource(server.URL, server.Client())
 

@@ -8,18 +8,16 @@ function json(route: Route, body: unknown, status = 200) {
   });
 }
 
-async function mockModelMappingApis(page: Page) {
+async function mockModelMappingApis(page: Page, availableModelIds = ['gpt-live-mapping-option']) {
   await page.route('**/v1/models', async (route) =>
     json(route, {
       object: 'list',
-      data: [
-        {
-          id: 'gpt-live-mapping-option',
-          object: 'model',
-          created: 0,
-          owned_by: 'maxx',
-        },
-      ],
+      data: availableModelIds.map((id) => ({
+        id,
+        object: 'model',
+        created: 0,
+        owned_by: 'maxx',
+      })),
     }),
   );
 
@@ -107,4 +105,22 @@ test('model mapping inputs include models advertised by availability endpoint', 
     }),
   ).toBeVisible();
   await expect(page.getByText('gpt-pricing-only-option')).toHaveCount(0);
+});
+
+test('model mapping inputs do not fall back to static common models without provider availability', async ({
+  page,
+}) => {
+  await mockModelMappingApis(page, []);
+
+  await page.goto('/model-mappings', { waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('heading', { name: /model mappings/i })).toBeVisible();
+
+  await page.getByRole('button', { name: /^Target$/ }).click();
+  await page.getByPlaceholder(/search or enter custom model/i).fill('gpt-4o');
+
+  await expect(
+    page.getByRole('button', {
+      name: /gpt-4o\s+GPT-4o/,
+    }),
+  ).toHaveCount(0);
 });

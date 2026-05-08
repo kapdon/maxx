@@ -232,13 +232,27 @@ func TestModelsHandlerFormats(t *testing.T) {
 func TestModelsHandlerUsesCLIProxyAPIRegistryModels(t *testing.T) {
 	registry := cliproxy.GlobalModelRegistry()
 	registry.RegisterClient("models-handler-test-codex", "codex", []*cliproxy.ModelInfo{{ID: "gpt-registry-live"}})
-	registry.RegisterClient("models-handler-test-claude", "claude", []*cliproxy.ModelInfo{{ID: "claude-registry-live"}})
+	registry.RegisterClient("models-handler-test-antigravity", "antigravity", []*cliproxy.ModelInfo{{ID: "claude-registry-live"}})
 	t.Cleanup(func() {
 		registry.UnregisterClient("models-handler-test-codex")
-		registry.UnregisterClient("models-handler-test-claude")
+		registry.UnregisterClient("models-handler-test-antigravity")
 	})
 
-	handler := NewModelsHandler(nil, nil, nil, nil)
+	providerRepo := &fakeProviderRepo{providers: []*domain.Provider{
+		{
+			Type: "codex",
+			Config: &domain.ProviderConfig{Codex: &domain.ProviderConfigCodex{
+				UseCLIProxyAPI: true,
+			}},
+		},
+		{
+			Type: "antigravity",
+			Config: &domain.ProviderConfig{Antigravity: &domain.ProviderConfigAntigravity{
+				UseCLIProxyAPI: true,
+			}},
+		},
+	}}
+	handler := NewModelsHandler(nil, providerRepo, nil, nil)
 
 	openAIReq := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	openAIReq.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
@@ -290,6 +304,36 @@ func TestModelsHandlerUsesCLIProxyAPIRegistryModels(t *testing.T) {
 	}
 	if !containsModel(claudeIDs, "gpt-registry-live") {
 		t.Fatalf("expected gpt-registry-live in claude-format model list")
+	}
+}
+
+func TestModelsHandlerDoesNotUseCLIProxyAPIRegistryWithoutProviders(t *testing.T) {
+	registry := cliproxy.GlobalModelRegistry()
+	registry.RegisterClient("models-handler-no-provider", "codex", []*cliproxy.ModelInfo{{ID: "gpt-registry-orphan"}})
+	t.Cleanup(func() {
+		registry.UnregisterClient("models-handler-no-provider")
+	})
+
+	handler := NewModelsHandler(nil, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var payload struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid payload: %v", err)
+	}
+	for _, item := range payload.Data {
+		if item.ID == "gpt-registry-orphan" {
+			t.Fatalf("did not expect registry model without a configured provider: %+v", payload.Data)
+		}
 	}
 }
 

@@ -58,24 +58,26 @@ func (s Source) Collect(ctx context.Context, tenantID uint64, opts CollectOption
 	}
 	result := make(map[string]struct{})
 
-	if opts.IncludeRegistry {
-		s.collectRegistryModels(result)
-	}
-
-	if s.ProviderRepo != nil && (opts.FetchProviderModelEndpoints || opts.IncludeProviderSupportModels) {
-		providers, err := s.ProviderRepo.List(tenantID)
+	var providers []*domain.Provider
+	if s.ProviderRepo != nil && (opts.IncludeRegistry || opts.FetchProviderModelEndpoints || opts.IncludeProviderSupportModels) {
+		var err error
+		providers, err = s.ProviderRepo.List(tenantID)
 		if err != nil {
 			return nil, err
 		}
-		for _, provider := range providers {
-			if opts.FetchProviderModelEndpoints {
-				if err := s.collectProviderEndpointModels(ctx, result, provider); err != nil {
-					return nil, err
-				}
+	}
+
+	for _, provider := range providers {
+		if opts.IncludeRegistry {
+			s.collectRegistryModelsForProvider(result, provider)
+		}
+		if opts.FetchProviderModelEndpoints {
+			if err := s.collectProviderEndpointModels(ctx, result, provider); err != nil {
+				return nil, err
 			}
-			if opts.IncludeProviderSupportModels {
-				collectProviderSupportModels(result, provider)
-			}
+		}
+		if opts.IncludeProviderSupportModels {
+			collectProviderSupportModels(result, provider)
 		}
 	}
 
@@ -101,39 +103,14 @@ func (s Source) registry() Registry {
 	return cliproxy.GlobalModelRegistry()
 }
 
-func (s Source) collectRegistryModels(result map[string]struct{}) {
+func (s Source) collectRegistryModelsForProvider(result map[string]struct{}, provider *domain.Provider) {
 	registry := s.registry()
 	if registry == nil {
 		return
 	}
 
-	for _, handlerType := range []string{"openai", "claude", "gemini"} {
-		for _, model := range registry.GetAvailableModels(handlerType) {
-			if model == nil {
-				continue
-			}
-			if id, _ := model["id"].(string); id != "" {
-				add(result, id)
-			}
-			if name, _ := model["name"].(string); name != "" {
-				add(result, name)
-			}
-		}
-	}
-
-	for _, provider := range []string{
-		"codex",
-		"antigravity",
-		"claude",
-		"gemini",
-		"gemini-cli",
-		"aistudio",
-		"vertex",
-		"openai",
-		"openai-compatibility",
-		"kimi",
-	} {
-		for _, model := range registry.GetAvailableModelsByProvider(provider) {
+	for _, providerKey := range registryProviderKeys(provider) {
+		for _, model := range registry.GetAvailableModelsByProvider(providerKey) {
 			if model == nil {
 				continue
 			}
@@ -141,6 +118,26 @@ func (s Source) collectRegistryModels(result map[string]struct{}) {
 			add(result, model.Name)
 		}
 	}
+}
+
+func registryProviderKeys(provider *domain.Provider) []string {
+	if provider == nil {
+		return nil
+	}
+	providerType := strings.ToLower(strings.TrimSpace(provider.Type))
+	cfg := provider.Config
+
+	switch providerType {
+	case "codex", "cliproxyapi-codex":
+		if cfg != nil && ((cfg.Codex != nil && cfg.Codex.UseCLIProxyAPI) || cfg.CLIProxyAPICodex != nil) {
+			return []string{"codex"}
+		}
+	case "antigravity", "cliproxyapi-antigravity":
+		if cfg != nil && ((cfg.Antigravity != nil && cfg.Antigravity.UseCLIProxyAPI) || cfg.CLIProxyAPIAntigravity != nil) {
+			return []string{"antigravity"}
+		}
+	}
+	return nil
 }
 
 func collectProviderSupportModels(result map[string]struct{}, provider *domain.Provider) {
@@ -182,8 +179,7 @@ func providerModelEndpoints(provider *domain.Provider) []modelEndpoint {
 		if baseURL == "" {
 			return
 		}
-		for _, path := range []string{"/v1/models", "/v1beta/models"} {
-			endpointURL := joinURLPath(baseURL, path)
+		for _, endpointURL := range modelEndpointURLs(baseURL) {
 			key := endpointURL + "\x00" + apiKey
 			if _, ok := seen[key]; ok {
 				continue
@@ -205,6 +201,31 @@ func providerModelEndpoints(provider *domain.Provider) []modelEndpoint {
 	}
 
 	return endpoints
+}
+
+func modelEndpointURLs(baseURL string) []string {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		return nil
+	}
+
+	parsed, err := url.Parse(baseURL)
+	if err == nil && parsed.Scheme != "" && parsed.Host != "" {
+		path := strings.TrimRight(parsed.Path, "/")
+		switch {
+		case strings.HasSuffix(path, "/models"):
+			parsed.RawQuery = ""
+			parsed.Fragment = ""
+			return []string{parsed.String()}
+		case strings.HasSuffix(path, "/v1") || strings.HasSuffix(path, "/v1beta"):
+			return []string{joinURLPath(baseURL, "/models")}
+		}
+	}
+
+	return []string{
+		joinURLPath(baseURL, "/v1/models"),
+		joinURLPath(baseURL, "/v1beta/models"),
+	}
 }
 
 func joinURLPath(baseURL, path string) string {
