@@ -81,6 +81,41 @@ type TransportRuntimeConfig = Required<Omit<TransportConfig, 'adminBaseURL'>> & 
   adminBaseURL: string;
 };
 
+function extractAvailableModelIDs(data: unknown): string[] {
+  const ids = new Set<string>();
+  const add = (value: unknown) => {
+    if (typeof value !== 'string') return;
+    const trimmed = value.trim().replace(/^models\//, '');
+    if (!trimmed || trimmed.includes('*')) return;
+    ids.add(trimmed);
+  };
+
+  if (data && typeof data === 'object') {
+    const payload = data as { data?: unknown; models?: unknown };
+    if (Array.isArray(payload.data)) {
+      for (const item of payload.data) {
+        if (item && typeof item === 'object') {
+          add((item as { id?: unknown; name?: unknown }).id);
+          add((item as { id?: unknown; name?: unknown }).name);
+        }
+      }
+    }
+    if (Array.isArray(payload.models)) {
+      for (const item of payload.models) {
+        if (item && typeof item === 'object') {
+          const model = item as { id?: unknown; name?: unknown; baseModelId?: unknown };
+          add(model.id);
+          add(model.name);
+          add(model.baseModelId);
+        }
+      }
+    }
+  }
+
+  return [...ids].sort((a, b) => a.localeCompare(b));
+}
+
+
 export class HttpTransport implements Transport {
   private client: AxiosInstance;
   private adminClient: AxiosInstance;
@@ -1022,6 +1057,11 @@ export class HttpTransport implements Transport {
     return this.expectArray<string>(data, '/response-models');
   }
 
+  async getAvailableModels(): Promise<string[]> {
+    const { data } = await axios.get<unknown>('/v1/models');
+    return extractAvailableModelIDs(data);
+  }
+
   // ===== Backup API =====
 
   async exportBackup(): Promise<BackupFile> {
@@ -1074,6 +1114,11 @@ export class HttpTransport implements Transport {
 
   async deleteModelPrice(id: number): Promise<void> {
     await this.adminClient.delete(`/model-prices/${id}`);
+  }
+
+  async updateModelPricesFromModelsDev(): Promise<ModelPrice[]> {
+    const { data } = await this.adminClient.post<ModelPrice[]>('/model-prices/update');
+    return this.expectArray<ModelPrice>(data, '/model-prices/update');
   }
 
   async resetModelPricesToDefaults(): Promise<ModelPrice[]> {

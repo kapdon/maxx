@@ -1,9 +1,15 @@
 name: Docker Image CI
 
 on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to publish (for example: v0.3.67)"
+        required: true
+        type: string
   push:
     tags:
-      - "*"
+      - "v*"
   workflow_call:
     inputs:
       tag:
@@ -23,13 +29,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ github.event_name == 'workflow_call' && inputs.tag || github.ref }}
 
       - name: Set image name
         id: image
         run: |
+          set -euo pipefail
           echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
-          TAG="${{ inputs.tag || github.ref_name }}"
+          TAG="${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && inputs.tag || github.ref_name }}"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Error: invalid image tag '$TAG'. Expected vX.Y.Z, for example v0.3.67." >&2
+            exit 1
+          fi
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Setup pnpm

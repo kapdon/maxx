@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/awsl-project/maxx/internal/domain"
+	"github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy"
 )
 
 type fakeResponseModelRepo struct {
@@ -71,6 +73,34 @@ func (f *fakeModelMappingRepo) DeleteAll(tenantID uint64) error    { return nil 
 func (f *fakeModelMappingRepo) ClearAll(tenantID uint64) error     { return nil }
 func (f *fakeModelMappingRepo) SeedDefaults(tenantID uint64) error { return nil }
 
+type fakeModelPriceRepo struct {
+	prices []*domain.ModelPrice
+	err    error
+}
+
+func (f *fakeModelPriceRepo) Create(price *domain.ModelPrice) error { return nil }
+func (f *fakeModelPriceRepo) BatchCreate(prices []*domain.ModelPrice) error {
+	return nil
+}
+func (f *fakeModelPriceRepo) GetByID(id uint64) (*domain.ModelPrice, error) { return nil, nil }
+func (f *fakeModelPriceRepo) GetCurrentByModelID(modelID string) (*domain.ModelPrice, error) {
+	return nil, nil
+}
+func (f *fakeModelPriceRepo) ListCurrentPrices() ([]*domain.ModelPrice, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return append([]*domain.ModelPrice(nil), f.prices...), nil
+}
+func (f *fakeModelPriceRepo) ListByModelID(modelID string) ([]*domain.ModelPrice, error) {
+	return nil, nil
+}
+func (f *fakeModelPriceRepo) Count() (int64, error)                          { return int64(len(f.prices)), f.err }
+func (f *fakeModelPriceRepo) Delete(id uint64) error                         { return nil }
+func (f *fakeModelPriceRepo) Update(price *domain.ModelPrice) error          { return nil }
+func (f *fakeModelPriceRepo) SoftDeleteAll() error                           { return nil }
+func (f *fakeModelPriceRepo) ResetToDefaults() ([]*domain.ModelPrice, error) { return nil, nil }
+
 func containsModel(ids []string, want string) bool {
 	for _, id := range ids {
 		if id == want {
@@ -94,13 +124,13 @@ func TestCollectModelNames(t *testing.T) {
 		},
 	}
 
-	handler := NewModelsHandler(responseRepo, providerRepo, mappingRepo)
-	names, err := handler.collectModelNames(0)
+	handler := NewModelsHandler(responseRepo, providerRepo, mappingRepo, nil)
+	names, err := handler.collectModelNames(context.Background(), 0)
 	if err != nil {
 		t.Fatalf("collectModelNames error: %v", err)
 	}
 
-	want := []string{"gpt-1", "gpt-2", "gpt-3", "gpt-4", "gpt-4o", "gpt-5"}
+	want := []string{"gpt-3"}
 	sort.Strings(want)
 	if len(names) != len(want) {
 		t.Fatalf("model count = %d, want %d", len(names), len(want))
@@ -114,7 +144,8 @@ func TestCollectModelNames(t *testing.T) {
 
 func TestModelsHandlerFormats(t *testing.T) {
 	responseRepo := &fakeResponseModelRepo{names: []string{"gpt-1"}}
-	handler := NewModelsHandler(responseRepo, nil, nil)
+	providerRepo := &fakeProviderRepo{providers: []*domain.Provider{{SupportModels: []string{"gpt-1"}}}}
+	handler := NewModelsHandler(responseRepo, providerRepo, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("User-Agent", "claude-cli/2.0")
@@ -198,8 +229,30 @@ func TestModelsHandlerFormats(t *testing.T) {
 	}
 }
 
-func TestModelsHandlerPricingSupplementByUserAgent(t *testing.T) {
-	handler := NewModelsHandler(nil, nil, nil)
+func TestModelsHandlerUsesCLIProxyAPIRegistryModels(t *testing.T) {
+	registry := cliproxy.GlobalModelRegistry()
+	registry.RegisterClient("models-handler-test-codex", "codex", []*cliproxy.ModelInfo{{ID: "gpt-registry-live"}})
+	registry.RegisterClient("models-handler-test-antigravity", "antigravity", []*cliproxy.ModelInfo{{ID: "claude-registry-live"}})
+	t.Cleanup(func() {
+		registry.UnregisterClient("models-handler-test-codex")
+		registry.UnregisterClient("models-handler-test-antigravity")
+	})
+
+	providerRepo := &fakeProviderRepo{providers: []*domain.Provider{
+		{
+			Type: "codex",
+			Config: &domain.ProviderConfig{Codex: &domain.ProviderConfigCodex{
+				UseCLIProxyAPI: true,
+			}},
+		},
+		{
+			Type: "antigravity",
+			Config: &domain.ProviderConfig{Antigravity: &domain.ProviderConfigAntigravity{
+				UseCLIProxyAPI: true,
+			}},
+		},
+	}}
+	handler := NewModelsHandler(nil, providerRepo, nil, nil)
 
 	openAIReq := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	openAIReq.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
@@ -220,20 +273,11 @@ func TestModelsHandlerPricingSupplementByUserAgent(t *testing.T) {
 	for _, item := range openAIPayload.Data {
 		openAIIDs = append(openAIIDs, item.ID)
 	}
-	if !containsModel(openAIIDs, "gpt-5.3") {
-		t.Fatalf("expected gpt-5.3 in openai model list")
+	if !containsModel(openAIIDs, "gpt-registry-live") {
+		t.Fatalf("expected gpt-registry-live in model list")
 	}
-	if !containsModel(openAIIDs, "gpt-5.4-mini") {
-		t.Fatalf("expected gpt-5.4-mini in openai model list")
-	}
-	if !containsModel(openAIIDs, "gpt-5.5") {
-		t.Fatalf("expected gpt-5.5 in openai model list")
-	}
-	if !containsModel(openAIIDs, "gpt-5.5-pro") {
-		t.Fatalf("expected gpt-5.5-pro in openai model list")
-	}
-	if containsModel(openAIIDs, "claude-opus-4-6") {
-		t.Fatalf("did not expect claude pricing-only model in codex model list")
+	if !containsModel(openAIIDs, "claude-registry-live") {
+		t.Fatalf("expected claude-registry-live in model list")
 	}
 
 	claudeReq := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
@@ -255,25 +299,77 @@ func TestModelsHandlerPricingSupplementByUserAgent(t *testing.T) {
 	for _, item := range claudePayload.Data {
 		claudeIDs = append(claudeIDs, item.ID)
 	}
-	if !containsModel(claudeIDs, "claude-opus-4-6") {
-		t.Fatalf("expected claude-opus-4-6 in claude model list")
+	if !containsModel(claudeIDs, "claude-registry-live") {
+		t.Fatalf("expected claude-registry-live in claude-format model list")
 	}
-	if containsModel(claudeIDs, "gpt-5.3") {
-		t.Fatalf("did not expect gpt-5.3 in claude model list")
+	if !containsModel(claudeIDs, "gpt-registry-live") {
+		t.Fatalf("expected gpt-registry-live in claude-format model list")
 	}
 }
 
-func TestShouldIncludePricingModelForUserAgentOpenAIOSeriesMatching(t *testing.T) {
-	if !shouldIncludePricingModelForUserAgent("o1-mini", "codex_cli_rs/0.98.0") {
-		t.Fatalf("expected o1-mini to be included")
+func TestModelsHandlerDoesNotUseCLIProxyAPIRegistryWithoutProviders(t *testing.T) {
+	registry := cliproxy.GlobalModelRegistry()
+	registry.RegisterClient("models-handler-no-provider", "codex", []*cliproxy.ModelInfo{{ID: "gpt-registry-orphan"}})
+	t.Cleanup(func() {
+		registry.UnregisterClient("models-handler-no-provider")
+	})
+
+	handler := NewModelsHandler(nil, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if !shouldIncludePricingModelForUserAgent("o3-mini", "codex_cli_rs/0.98.0") {
-		t.Fatalf("expected o3-mini to be included")
+	var payload struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
 	}
-	if !shouldIncludePricingModelForUserAgent("o4-mini", "codex_cli_rs/0.98.0") {
-		t.Fatalf("expected o4-mini to be included")
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid payload: %v", err)
 	}
-	if shouldIncludePricingModelForUserAgent("ollama-foo", "codex_cli_rs/0.98.0") {
-		t.Fatalf("did not expect ollama-foo to be included")
+	for _, item := range payload.Data {
+		if item.ID == "gpt-registry-orphan" {
+			t.Fatalf("did not expect registry model without a configured provider: %+v", payload.Data)
+		}
+	}
+}
+
+func TestModelsHandlerDoesNotUseCurrentModelPricesForAvailability(t *testing.T) {
+	priceRepo := &fakeModelPriceRepo{
+		prices: []*domain.ModelPrice{
+			{ModelID: "gpt-live-from-pricing"},
+			{ModelID: "claude-live-from-pricing"},
+			{ModelID: "*wildcard-skip"},
+		},
+	}
+	handler := NewModelsHandler(nil, nil, nil, priceRepo)
+
+	openAIReq := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	openAIReq.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
+	openAIRec := httptest.NewRecorder()
+	handler.ServeHTTP(openAIRec, openAIReq)
+	if openAIRec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", openAIRec.Code)
+	}
+	var openAIPayload struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(openAIRec.Body.Bytes(), &openAIPayload); err != nil {
+		t.Fatalf("invalid openai payload: %v", err)
+	}
+	openAIIDs := make([]string, 0, len(openAIPayload.Data))
+	for _, item := range openAIPayload.Data {
+		openAIIDs = append(openAIIDs, item.ID)
+	}
+	if containsModel(openAIIDs, "gpt-live-from-pricing") {
+		t.Fatalf("did not expect pricing-only model in model availability list")
+	}
+	if containsModel(openAIIDs, "claude-live-from-pricing") || containsModel(openAIIDs, "*wildcard-skip") {
+		t.Fatalf("did not expect wildcard price row in model list")
 	}
 }

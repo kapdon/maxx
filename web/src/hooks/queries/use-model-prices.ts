@@ -76,6 +76,20 @@ export function useDeleteModelPrice() {
   });
 }
 
+// 更新当前可访问模型的 Model Prices（models.dev 仅作为价格来源）
+export function useUpdateModelPricesFromModelsDev() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => getTransport().updateModelPricesFromModelsDev(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: modelPriceKeys.lists() });
+      // Also invalidate the pricing query since it may use database prices
+      queryClient.invalidateQueries({ queryKey: pricingKeys.all });
+    },
+  });
+}
+
 // 重置 Model Prices 为默认值
 export function useResetModelPricesToDefaults() {
   const queryClient = useQueryClient();

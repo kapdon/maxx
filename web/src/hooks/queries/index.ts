@@ -143,6 +143,7 @@ export {
 
 // Response Model hooks
 export { responseModelKeys, useResponseModels } from './use-response-models';
+export { availableModelKeys, useAvailableModels } from './use-available-models';
 
 // Dashboard Stats hooks
 export {
@@ -170,6 +171,7 @@ export {
   useCreateModelPrice,
   useUpdateModelPrice,
   useDeleteModelPrice,
+  useUpdateModelPricesFromModelsDev,
   useResetModelPricesToDefaults,
 } from './use-model-prices';
 

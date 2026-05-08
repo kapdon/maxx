@@ -161,7 +161,7 @@ func NewTestEnv(t *testing.T) *TestEnv {
 	authHandler := handler.NewAuthHandler(authMiddleware, userRepo, tenantRepo, inviteCodeRepo, inviteCodeUsageRepo, true)
 
 	// Create models handler
-	modelsHandler := handler.NewModelsHandler(responseModelRepo, cachedProviderRepo, cachedModelMappingRepo)
+	modelsHandler := handler.NewModelsHandler(responseModelRepo, cachedProviderRepo, cachedModelMappingRepo, modelPriceRepo)
 
 	// Setup routes (mirroring main.go)
 	mux := http.NewServeMux()

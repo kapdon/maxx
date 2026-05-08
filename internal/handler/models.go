@@ -1,12 +1,12 @@
 package handler
 
 import (
+	"context"
 	"net/http"
-	"sort"
 	"strings"
 
 	maxxctx "github.com/awsl-project/maxx/internal/context"
-	"github.com/awsl-project/maxx/internal/pricing"
+	"github.com/awsl-project/maxx/internal/modelavailability"
 	"github.com/awsl-project/maxx/internal/repository"
 )
 
@@ -15,6 +15,7 @@ type ModelsHandler struct {
 	responseModelRepo repository.ResponseModelRepository
 	providerRepo      repository.ProviderRepository
 	modelMappingRepo  repository.ModelMappingRepository
+	modelPriceRepo    repository.ModelPriceRepository
 }
 
 // NewModelsHandler creates a new ModelsHandler.
@@ -22,11 +23,13 @@ func NewModelsHandler(
 	responseModelRepo repository.ResponseModelRepository,
 	providerRepo repository.ProviderRepository,
 	modelMappingRepo repository.ModelMappingRepository,
+	modelPriceRepo repository.ModelPriceRepository,
 ) *ModelsHandler {
 	return &ModelsHandler{
 		responseModelRepo: responseModelRepo,
 		providerRepo:      providerRepo,
 		modelMappingRepo:  modelMappingRepo,
+		modelPriceRepo:    modelPriceRepo,
 	}
 }
 
@@ -44,9 +47,9 @@ func (h *ModelsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var names []string
 	var err error
 	if isGeminiModels {
-		names, err = h.collectModelNames(tenantID)
+		names, err = h.collectModelNames(r.Context(), tenantID)
 	} else {
-		names, err = h.collectModelNamesForUserAgent(tenantID, userAgent)
+		names, err = h.collectModelNamesForUserAgent(r.Context(), tenantID, userAgent)
 	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -74,99 +77,15 @@ func isGeminiModelsPath(path string) bool {
 	return path == "/v1beta/models"
 }
 
-func (h *ModelsHandler) collectModelNames(tenantID uint64) ([]string, error) {
-	return h.collectModelNamesForUserAgent(tenantID, "")
+func (h *ModelsHandler) collectModelNames(ctx context.Context, tenantID uint64) ([]string, error) {
+	return h.collectModelNamesForUserAgent(ctx, tenantID, "")
 }
 
-func (h *ModelsHandler) collectModelNamesForUserAgent(tenantID uint64, userAgent string) ([]string, error) {
-	result := make(map[string]struct{})
-
-	if h.responseModelRepo != nil {
-		names, err := h.responseModelRepo.ListNames()
-		if err != nil {
-			return nil, err
-		}
-		for _, name := range names {
-			addModelName(result, name)
-		}
+func (h *ModelsHandler) collectModelNamesForUserAgent(ctx context.Context, tenantID uint64, _ string) ([]string, error) {
+	source := modelavailability.Source{
+		ProviderRepo: h.providerRepo,
 	}
-
-	if h.providerRepo != nil {
-		providers, err := h.providerRepo.List(tenantID)
-		if err != nil {
-			return nil, err
-		}
-		for _, provider := range providers {
-			for _, name := range provider.SupportModels {
-				addModelName(result, name)
-			}
-		}
-	}
-
-	if h.modelMappingRepo != nil {
-		mappings, err := h.modelMappingRepo.ListEnabled(tenantID)
-		if err != nil {
-			return nil, err
-		}
-		for _, mapping := range mappings {
-			addModelName(result, mapping.Target)
-			addModelName(result, mapping.Pattern)
-		}
-	}
-
-	appendPricingModelNames(result, userAgent)
-
-	names := make([]string, 0, len(result))
-	for name := range result {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names, nil
-}
-
-func appendPricingModelNames(target map[string]struct{}, userAgent string) {
-	for _, modelPricing := range pricing.DefaultPriceTable().All() {
-		modelID := strings.TrimSpace(modelPricing.ModelID)
-		if modelID == "" {
-			continue
-		}
-		if !shouldIncludePricingModelForUserAgent(modelID, userAgent) {
-			continue
-		}
-		addModelName(target, modelID)
-	}
-}
-
-func shouldIncludePricingModelForUserAgent(modelID, userAgent string) bool {
-	modelIDLower := strings.ToLower(strings.TrimSpace(modelID))
-	if modelIDLower == "" {
-		return false
-	}
-
-	userAgentLower := strings.ToLower(strings.TrimSpace(userAgent))
-	if userAgentLower == "" {
-		return false
-	}
-	if strings.HasPrefix(userAgentLower, "claude-cli") {
-		return strings.HasPrefix(modelIDLower, "claude-")
-	}
-
-	return strings.HasPrefix(modelIDLower, "gpt-") ||
-		strings.HasPrefix(modelIDLower, "o1") ||
-		strings.HasPrefix(modelIDLower, "o3") ||
-		strings.HasPrefix(modelIDLower, "o4") ||
-		strings.Contains(modelIDLower, "codex")
-}
-
-func addModelName(target map[string]struct{}, name string) {
-	trimmed := strings.TrimSpace(name)
-	if trimmed == "" {
-		return
-	}
-	if strings.Contains(trimmed, "*") {
-		return
-	}
-	target[trimmed] = struct{}{}
+	return source.Collect(ctx, tenantID, modelavailability.DefaultCollectOptions())
 }
 
 func buildOpenAIModelsResponse(names []string) map[string]interface{} {

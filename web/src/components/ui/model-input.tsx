@@ -4,139 +4,15 @@ import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { useAvailableModels } from '@/hooks/queries';
 
-// 常见模型列表
-const COMMON_MODELS = [
-  // Claude wildcards (for source patterns)
-  { id: '*claude*', name: 'All Claude models', provider: 'Claude' },
-  { id: '*sonnet*', name: 'All Sonnet models', provider: 'Claude' },
-  { id: '*opus*', name: 'All Opus models', provider: 'Claude' },
-  { id: '*haiku*', name: 'All Haiku models', provider: 'Claude' },
-  // Claude models
-  {
-    id: 'claude-sonnet-4-20250514',
-    name: 'Claude Sonnet 4',
-    provider: 'Claude',
-  },
-  { id: 'claude-opus-4-20250514', name: 'Claude Opus 4', provider: 'Claude' },
-  {
-    id: 'claude-3-5-sonnet-20241022',
-    name: 'Claude 3.5 Sonnet',
-    provider: 'Claude',
-  },
-  {
-    id: 'claude-3-5-haiku-20241022',
-    name: 'Claude 3.5 Haiku',
-    provider: 'Claude',
-  },
-  { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus', provider: 'Claude' },
-  // Gemini wildcards
-  { id: '*gemini*', name: 'All Gemini models', provider: 'Gemini' },
-  { id: '*flash*', name: 'All Flash models', provider: 'Gemini' },
-  // Gemini models
-  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', provider: 'Gemini' },
-  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'Gemini' },
-  {
-    id: 'gemini-2.5-flash-lite',
-    name: 'Gemini 2.5 Flash Lite',
-    provider: 'Gemini',
-  },
-  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', provider: 'Gemini' },
-  { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', provider: 'Gemini' },
-  { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', provider: 'Gemini' },
-  // OpenAI wildcards
-  { id: '*gpt*', name: 'All GPT models', provider: 'OpenAI' },
-  { id: '*o1*', name: 'All o1 models', provider: 'OpenAI' },
-  { id: '*o3*', name: 'All o3 models', provider: 'OpenAI' },
-  // NVIDIA/Meta wildcards
-  { id: '*llama*', name: 'All Llama models', provider: 'NVIDIA' },
-  { id: 'meta/*', name: 'All Meta models', provider: 'NVIDIA' },
-  // OpenAI models
-  { id: 'gpt-4o', name: 'GPT-4o', provider: 'OpenAI' },
-  { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'OpenAI' },
-  { id: 'gpt-4-turbo', name: 'GPT-4 Turbo', provider: 'OpenAI' },
-  { id: 'gpt-4', name: 'GPT-4', provider: 'OpenAI' },
-  { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', provider: 'OpenAI' },
-  { id: 'o1', name: 'o1', provider: 'OpenAI' },
-  { id: 'o1-mini', name: 'o1 Mini', provider: 'OpenAI' },
-  { id: 'o1-pro', name: 'o1 Pro', provider: 'OpenAI' },
-  { id: 'o3-mini', name: 'o3 Mini', provider: 'OpenAI' },
-  { id: 'gpt-5.5', name: 'GPT-5.5', provider: 'OpenAI' },
-  { id: 'gpt-5.5-pro', name: 'GPT-5.5 Pro', provider: 'OpenAI' },
-  { id: 'gpt-5.3', name: 'GPT-5.3', provider: 'OpenAI' },
-  { id: 'gpt-5.3-codex', name: 'GPT-5.3 Codex', provider: 'OpenAI' },
-  { id: 'gpt-5.4', name: 'GPT-5.4', provider: 'OpenAI' },
-  { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', provider: 'OpenAI' },
-  // NVIDIA models
-  { id: 'minimaxai/minimax-m2.1', name: 'MiniMax M2.1', provider: 'NVIDIA' },
-  { id: 'z-ai/glm4.7', name: 'GLM 4.7', provider: 'NVIDIA' },
-  { id: 'deepseek-ai/deepseek-rl', name: 'DeepSeek RL', provider: 'NVIDIA' },
-  { id: 'qwen/qwen2.5-coder-32b-instruct', name: 'Qwen 2.5 Coder 32B', provider: 'NVIDIA' },
-  { id: 'openai/gpt-oss-120b', name: 'GPT OSS 120B', provider: 'NVIDIA' },
-  { id: 'google/gemma-3-27b-it', name: 'Gemma 3 27B', provider: 'NVIDIA' },
-  {
-    id: 'meta/llama-4-maverick-17b-128e-instruct',
-    name: 'Llama 4 Maverick 17B',
-    provider: 'NVIDIA',
-  },
-  { id: 'mistralai/devstral-2-123b-instruct-2512', name: 'Devstral 2 123B', provider: 'NVIDIA' },
-  // Antigravity supported target models (use these as mapping targets)
-  {
-    id: 'claude-opus-4-6-thinking',
-    name: 'Claude Opus 4.6 Thinking',
-    provider: 'Antigravity',
-  },
-  {
-    id: 'claude-opus-4-5-thinking',
-    name: 'Claude Opus 4.5 Thinking',
-    provider: 'Antigravity',
-  },
-  {
-    id: 'claude-sonnet-4-5',
-    name: 'Claude Sonnet 4.5',
-    provider: 'Antigravity',
-  },
-  {
-    id: 'claude-sonnet-4-5-thinking',
-    name: 'Claude Sonnet 4.5 Thinking',
-    provider: 'Antigravity',
-  },
-  {
-    id: 'gemini-2.5-flash-lite',
-    name: 'Gemini 2.5 Flash Lite',
-    provider: 'Antigravity',
-  },
-  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'Antigravity' },
-  {
-    id: 'gemini-2.5-flash-thinking',
-    name: 'Gemini 2.5 Flash Thinking',
-    provider: 'Antigravity',
-  },
-  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', provider: 'Antigravity' },
-  { id: 'gemini-3-flash', name: 'Gemini 3 Flash', provider: 'Antigravity' },
-  { id: 'gemini-3-pro', name: 'Gemini 3 Pro', provider: 'Antigravity' },
-  { id: 'gemini-3-pro-low', name: 'Gemini 3 Pro Low', provider: 'Antigravity' },
-  {
-    id: 'gemini-3-pro-high',
-    name: 'Gemini 3 Pro High',
-    provider: 'Antigravity',
-  },
-  {
-    id: 'gemini-3-pro-preview',
-    name: 'Gemini 3 Pro Preview',
-    provider: 'Antigravity',
-  },
-  {
-    id: 'gemini-3-pro-image',
-    name: 'Gemini 3 Pro Image',
-    provider: 'Antigravity',
-  },
-  // Generic wildcard
-  { id: '*', name: 'All models (catch-all)', provider: 'Other' },
-] as const;
+type Provider = 'Claude' | 'Gemini' | 'OpenAI' | 'NVIDIA' | 'Antigravity' | 'Other';
 
-type Model = (typeof COMMON_MODELS)[number];
-type Provider = Model['provider'];
+interface Model {
+  id: string;
+  name: string;
+  provider: string;
+}
 
 interface ModelInputProps {
   value: string;
@@ -185,6 +61,29 @@ function matchScore(model: Model, pattern: string): number {
   return 40;
 }
 
+function mergeModelOptions(models: Model[]): Model[] {
+  const seen = new Set<string>();
+  const merged: Model[] = [];
+
+  for (const model of models) {
+    const id = model.id.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    merged.push({ ...model, id });
+  }
+
+  return merged;
+}
+
+function inferProvider(modelId: string): Model['provider'] {
+  const id = modelId.toLowerCase();
+  if (id.startsWith('claude-')) return 'Claude';
+  if (id.startsWith('gemini-')) return 'Gemini';
+  if (id.startsWith('gpt-') || /^o\d/.test(id) || id.includes('codex')) return 'OpenAI';
+  if (id.includes('llama') || id.includes('mistral') || id.includes('qwen')) return 'NVIDIA';
+  return 'Other';
+}
+
 export function ModelInput({
   value,
   onChange,
@@ -199,12 +98,24 @@ export function ModelInput({
   const [search, setSearch] = useState('');
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const focusedRef = useRef<HTMLButtonElement>(null);
+  const { data: availableModelIds } = useAvailableModels();
 
-  // Base models filtered by providers prop
+  const availableModels = useMemo<Model[]>(() => {
+    const models = (availableModelIds || []).map((id) => ({
+      id,
+      name: id,
+      provider: inferProvider(id),
+    }));
+
+    if (!providers || providers.length === 0) return models;
+    return models.filter((model) => providers.includes(model.provider as Provider));
+  }, [availableModelIds, providers]);
+
+  // Mapping choices are runtime/provider-driven. Static common models stay out of
+  // the selectable list so an empty provider inventory produces no suggestions.
   const baseModels = useMemo(() => {
-    if (!providers || providers.length === 0) return [...COMMON_MODELS];
-    return COMMON_MODELS.filter((model) => providers.includes(model.provider));
-  }, [providers]);
+    return mergeModelOptions(availableModels);
+  }, [availableModels]);
 
   // 过滤和排序模型（支持模糊匹配）
   const filteredModels = useMemo(() => {

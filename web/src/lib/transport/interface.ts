@@ -271,6 +271,7 @@ export interface Transport {
 
   // ===== Response Model API =====
   getResponseModels(): Promise<string[]>;
+  getAvailableModels(): Promise<string[]>;
 
   // ===== Backup API =====
   exportBackup(): Promise<BackupFile>;
@@ -285,6 +286,7 @@ export interface Transport {
   createModelPrice(data: ModelPriceInput): Promise<ModelPrice>;
   updateModelPrice(id: number, data: ModelPriceInput): Promise<ModelPrice>;
   deleteModelPrice(id: number): Promise<void>;
+  updateModelPricesFromModelsDev(): Promise<ModelPrice[]>;
   resetModelPricesToDefaults(): Promise<ModelPrice[]>;
 
   // ===== 实时订阅 =====

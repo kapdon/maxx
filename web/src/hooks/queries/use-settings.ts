@@ -5,6 +5,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getTransport } from '@/lib/transport';
 import type { ModelMappingInput } from '@/lib/transport';
+import { availableModelKeys } from './use-available-models';
 
 export const settingsKeys = {
   all: ['settings'] as const,
@@ -119,6 +120,7 @@ export function useCreateModelMapping() {
     mutationFn: (data: ModelMappingInput) => getTransport().createModelMapping(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: settingsKeys.modelMappings });
+      queryClient.invalidateQueries({ queryKey: availableModelKeys.all });
     },
   });
 }
@@ -131,6 +133,7 @@ export function useUpdateModelMapping() {
       getTransport().updateModelMapping(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: settingsKeys.modelMappings });
+      queryClient.invalidateQueries({ queryKey: availableModelKeys.all });
     },
   });
 }
@@ -142,6 +145,7 @@ export function useDeleteModelMapping() {
     mutationFn: (id: number) => getTransport().deleteModelMapping(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: settingsKeys.modelMappings });
+      queryClient.invalidateQueries({ queryKey: availableModelKeys.all });
     },
   });
 }
@@ -153,6 +157,7 @@ export function useClearAllModelMappings() {
     mutationFn: () => getTransport().clearAllModelMappings(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: settingsKeys.modelMappings });
+      queryClient.invalidateQueries({ queryKey: availableModelKeys.all });
     },
   });
 }
@@ -164,6 +169,7 @@ export function useResetModelMappingsToDefaults() {
     mutationFn: () => getTransport().resetModelMappingsToDefaults(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: settingsKeys.modelMappings });
+      queryClient.invalidateQueries({ queryKey: availableModelKeys.all });
     },
   });
 }

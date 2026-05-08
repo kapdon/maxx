@@ -16,6 +16,7 @@ import (
 	"github.com/awsl-project/maxx/internal/adapter/provider"
 	"github.com/awsl-project/maxx/internal/domain"
 	"github.com/awsl-project/maxx/internal/flow"
+	"github.com/awsl-project/maxx/internal/modelavailability"
 	"github.com/awsl-project/maxx/internal/payloadoverride"
 	"github.com/awsl-project/maxx/internal/usage"
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
@@ -54,6 +55,7 @@ func (a *CLIProxyAPICodexAdapter) codexConfig() *domain.ProviderConfigCodex {
 func NewAdapter(p *domain.Provider) (provider.ProviderAdapter, error) {
 	cfg := ensureCodexConfig(p)
 	p.Config.Codex = cfg
+	modelavailability.RegisterCLIProxyCodexProvider(p)
 
 	// 创建 Auth 对象
 	metadata := map[string]any{

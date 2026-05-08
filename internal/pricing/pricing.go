@@ -83,6 +83,65 @@ func (pt *PriceTable) All() []*ModelPricing {
 	return prices
 }
 
+// FilterPriceTableByModelIDs returns a table containing only price rows for the
+// provided available model IDs. Matching uses PriceTable.Get so exact rows win
+// and prefix rows can price versioned/thinking model variants; when a prefix
+// row matches, the price is copied onto the concrete available model ID.
+func FilterPriceTableByModelIDs(pt *PriceTable, modelIDs []string) *PriceTable {
+	version := ""
+	if pt != nil {
+		version = pt.Version
+	}
+	filtered := NewPriceTable(version)
+	if pt == nil || len(modelIDs) == 0 {
+		return filtered
+	}
+
+	seen := make(map[string]struct{}, len(modelIDs))
+	for _, modelID := range modelIDs {
+		normalized := normalizeAvailableModelID(modelID)
+		if normalized == "" || strings.Contains(normalized, "*") {
+			continue
+		}
+		key := strings.ToLower(normalized)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+
+		pricing := pt.Get(normalized)
+		if pricing == nil {
+			continue
+		}
+		filtered.Set(cloneModelPricingForModelID(pricing, normalized))
+	}
+
+	return filtered
+}
+
+func normalizeAvailableModelID(modelID string) string {
+	trimmed := strings.TrimSpace(modelID)
+	trimmed = strings.TrimPrefix(trimmed, "models/")
+	return strings.TrimSpace(trimmed)
+}
+
+func cloneModelPricing(pricing *ModelPricing) *ModelPricing {
+	if pricing == nil {
+		return nil
+	}
+	copy := *pricing
+	return &copy
+}
+
+func cloneModelPricingForModelID(pricing *ModelPricing, modelID string) *ModelPricing {
+	copy := cloneModelPricing(pricing)
+	if copy == nil {
+		return nil
+	}
+	copy.ModelID = modelID
+	return copy
+}
+
 // GetEffectiveCacheReadPriceMicro 获取有效的缓存读取价格 (microUSD/M tokens)
 // 如果未设置，返回 inputPriceMicro / 10
 func (p *ModelPricing) GetEffectiveCacheReadPriceMicro() uint64 {
