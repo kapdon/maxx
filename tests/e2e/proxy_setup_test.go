@@ -194,7 +194,7 @@ func NewProxyTestEnv(t *testing.T) *ProxyTestEnv {
 	authHandler := handler.NewAuthHandler(authMiddleware, userRepo, tenantRepo, inviteCodeRepo, inviteCodeUsageRepo, true)
 
 	// Create models handler
-	modelsHandler := handler.NewModelsHandler(responseModelRepo, cachedProviderRepo, cachedModelMappingRepo)
+	modelsHandler := handler.NewModelsHandler(responseModelRepo, cachedProviderRepo, cachedModelMappingRepo, modelPriceRepo)
 	projectProxyHandler := handler.NewProjectProxyHandler(proxyHandler, modelsHandler, cachedProjectRepo)
 	providerProxyHandler := handler.NewProviderProxyHandler(proxyHandler, modelsHandler, cachedProviderRepo, cachedRouteRepo, proxyRequestRepo)
 

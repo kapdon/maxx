@@ -71,6 +71,34 @@ func (f *fakeModelMappingRepo) DeleteAll(tenantID uint64) error    { return nil 
 func (f *fakeModelMappingRepo) ClearAll(tenantID uint64) error     { return nil }
 func (f *fakeModelMappingRepo) SeedDefaults(tenantID uint64) error { return nil }
 
+type fakeModelPriceRepo struct {
+	prices []*domain.ModelPrice
+	err    error
+}
+
+func (f *fakeModelPriceRepo) Create(price *domain.ModelPrice) error { return nil }
+func (f *fakeModelPriceRepo) BatchCreate(prices []*domain.ModelPrice) error {
+	return nil
+}
+func (f *fakeModelPriceRepo) GetByID(id uint64) (*domain.ModelPrice, error) { return nil, nil }
+func (f *fakeModelPriceRepo) GetCurrentByModelID(modelID string) (*domain.ModelPrice, error) {
+	return nil, nil
+}
+func (f *fakeModelPriceRepo) ListCurrentPrices() ([]*domain.ModelPrice, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return append([]*domain.ModelPrice(nil), f.prices...), nil
+}
+func (f *fakeModelPriceRepo) ListByModelID(modelID string) ([]*domain.ModelPrice, error) {
+	return nil, nil
+}
+func (f *fakeModelPriceRepo) Count() (int64, error)                          { return int64(len(f.prices)), f.err }
+func (f *fakeModelPriceRepo) Delete(id uint64) error                         { return nil }
+func (f *fakeModelPriceRepo) Update(price *domain.ModelPrice) error          { return nil }
+func (f *fakeModelPriceRepo) SoftDeleteAll() error                           { return nil }
+func (f *fakeModelPriceRepo) ResetToDefaults() ([]*domain.ModelPrice, error) { return nil, nil }
+
 func containsModel(ids []string, want string) bool {
 	for _, id := range ids {
 		if id == want {
@@ -94,7 +122,7 @@ func TestCollectModelNames(t *testing.T) {
 		},
 	}
 
-	handler := NewModelsHandler(responseRepo, providerRepo, mappingRepo)
+	handler := NewModelsHandler(responseRepo, providerRepo, mappingRepo, nil)
 	names, err := handler.collectModelNames(0)
 	if err != nil {
 		t.Fatalf("collectModelNames error: %v", err)
@@ -114,7 +142,7 @@ func TestCollectModelNames(t *testing.T) {
 
 func TestModelsHandlerFormats(t *testing.T) {
 	responseRepo := &fakeResponseModelRepo{names: []string{"gpt-1"}}
-	handler := NewModelsHandler(responseRepo, nil, nil)
+	handler := NewModelsHandler(responseRepo, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("User-Agent", "claude-cli/2.0")
@@ -199,7 +227,7 @@ func TestModelsHandlerFormats(t *testing.T) {
 }
 
 func TestModelsHandlerPricingSupplementByUserAgent(t *testing.T) {
-	handler := NewModelsHandler(nil, nil, nil)
+	handler := NewModelsHandler(nil, nil, nil, nil)
 
 	openAIReq := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	openAIReq.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
@@ -261,6 +289,73 @@ func TestModelsHandlerPricingSupplementByUserAgent(t *testing.T) {
 	if containsModel(claudeIDs, "gpt-5.3") {
 		t.Fatalf("did not expect gpt-5.3 in claude model list")
 	}
+}
+
+func TestModelsHandlerUsesCurrentModelPricesForSupplements(t *testing.T) {
+	priceRepo := &fakeModelPriceRepo{
+		prices: []*domain.ModelPrice{
+			{ModelID: "gpt-live-from-pricing"},
+			{ModelID: "claude-live-from-pricing"},
+			{ModelID: "*wildcard-skip"},
+		},
+	}
+	handler := NewModelsHandler(nil, nil, nil, priceRepo)
+
+	openAIReq := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	openAIReq.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
+	openAIRec := httptest.NewRecorder()
+	handler.ServeHTTP(openAIRec, openAIReq)
+	if openAIRec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", openAIRec.Code)
+	}
+	var openAIPayload struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(openAIRec.Body.Bytes(), &openAIPayload); err != nil {
+		t.Fatalf("invalid openai payload: %v", err)
+	}
+	openAIIDs := make([]string, 0, len(openAIPayload.Data))
+	for _, item := range openAIPayload.Data {
+		openAIIDs = append(openAIIDs, item.ID)
+	}
+	if !containsModel(openAIIDs, "gpt-live-from-pricing") {
+		t.Fatalf("expected gpt-live-from-pricing from current model prices")
+	}
+	if containsModel(openAIIDs, "claude-live-from-pricing") {
+		t.Fatalf("did not expect claude-live-from-pricing in codex/openai model list")
+	}
+	if containsModel(openAIIDs, "*wildcard-skip") {
+		t.Fatalf("did not expect wildcard price row in model list")
+	}
+
+	claudeReq := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	claudeReq.Header.Set("User-Agent", "claude-cli/2.1.17")
+	claudeRec := httptest.NewRecorder()
+	handler.ServeHTTP(claudeRec, claudeReq)
+	if claudeRec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", claudeRec.Code)
+	}
+	var claudePayload struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(claudeRec.Body.Bytes(), &claudePayload); err != nil {
+		t.Fatalf("invalid claude payload: %v", err)
+	}
+	claudeIDs := make([]string, 0, len(claudePayload.Data))
+	for _, item := range claudePayload.Data {
+		claudeIDs = append(claudeIDs, item.ID)
+	}
+	if !containsModel(claudeIDs, "claude-live-from-pricing") {
+		t.Fatalf("expected claude-live-from-pricing from current model prices")
+	}
+	if containsModel(claudeIDs, "gpt-live-from-pricing") {
+		t.Fatalf("did not expect gpt-live-from-pricing in claude model list")
+	}
+
 }
 
 func TestShouldIncludePricingModelForUserAgentOpenAIOSeriesMatching(t *testing.T) {

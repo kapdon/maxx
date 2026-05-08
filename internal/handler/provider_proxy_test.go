@@ -162,7 +162,7 @@ func TestProjectAPIPathAllowsExactGeminiModelList(t *testing.T) {
 }
 
 func TestProjectProxyRoutesGeminiModelListToModelsHandler(t *testing.T) {
-	modelsHandler := NewModelsHandler(&fakeResponseModelRepo{names: []string{"gpt-1"}}, nil, nil)
+	modelsHandler := NewModelsHandler(&fakeResponseModelRepo{names: []string{"gpt-1"}}, nil, nil, nil)
 	handler := NewProjectProxyHandler(nil, modelsHandler, &fakeProjectRepo{
 		project: &domain.Project{ID: 42, Name: "Demo", Slug: "demo"},
 	})
@@ -179,7 +179,7 @@ func TestProjectProxyRoutesGeminiModelListToModelsHandler(t *testing.T) {
 }
 
 func TestProviderProxyRoutesGeminiModelListToModelsHandler(t *testing.T) {
-	modelsHandler := NewModelsHandler(&fakeResponseModelRepo{names: []string{"gpt-1"}}, nil, nil)
+	modelsHandler := NewModelsHandler(&fakeResponseModelRepo{names: []string{"gpt-1"}}, nil, nil, nil)
 	handler := NewProviderProxyHandler(nil, modelsHandler, &fakeProviderByIDRepo{
 		provider: &domain.Provider{ID: 1, Name: "Provider"},
 	}, nil, nil)

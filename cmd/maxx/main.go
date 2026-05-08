@@ -17,9 +17,9 @@ import (
 
 	"github.com/awsl-project/maxx/internal/adapter/client"
 	"github.com/awsl-project/maxx/internal/adapter/provider/bedrock"
-	_ "github.com/awsl-project/maxx/internal/adapter/provider/claude"  // Register claude adapter
-	_ "github.com/awsl-project/maxx/internal/adapter/provider/custom"  // Register custom adapter
-	_ "github.com/awsl-project/maxx/internal/adapter/provider/kiro"    // Register kiro adapter
+	_ "github.com/awsl-project/maxx/internal/adapter/provider/claude" // Register claude adapter
+	_ "github.com/awsl-project/maxx/internal/adapter/provider/custom" // Register custom adapter
+	_ "github.com/awsl-project/maxx/internal/adapter/provider/kiro"   // Register kiro adapter
 	"github.com/awsl-project/maxx/internal/converter"
 	"github.com/awsl-project/maxx/internal/cooldown"
 	"github.com/awsl-project/maxx/internal/core"
@@ -424,7 +424,7 @@ func main() {
 	claudeHandler := handler.NewClaudeHandler(adminService, wsHub)
 
 	// Use already-created cached project repository for project proxy handler
-	modelsHandler := handler.NewModelsHandler(responseModelRepo, cachedProviderRepo, cachedModelMappingRepo)
+	modelsHandler := handler.NewModelsHandler(responseModelRepo, cachedProviderRepo, cachedModelMappingRepo, modelPriceRepo)
 	projectProxyHandler := handler.NewProjectProxyHandler(proxyHandler, modelsHandler, cachedProjectRepo)
 	providerProxyHandler := handler.NewProviderProxyHandler(proxyHandler, modelsHandler, cachedProviderRepo, cachedRouteRepo, proxyRequestRepo)
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	maxxctx "github.com/awsl-project/maxx/internal/context"
+	"github.com/awsl-project/maxx/internal/domain"
 	"github.com/awsl-project/maxx/internal/pricing"
 	"github.com/awsl-project/maxx/internal/repository"
 )
@@ -15,6 +16,7 @@ type ModelsHandler struct {
 	responseModelRepo repository.ResponseModelRepository
 	providerRepo      repository.ProviderRepository
 	modelMappingRepo  repository.ModelMappingRepository
+	modelPriceRepo    repository.ModelPriceRepository
 }
 
 // NewModelsHandler creates a new ModelsHandler.
@@ -22,11 +24,13 @@ func NewModelsHandler(
 	responseModelRepo repository.ResponseModelRepository,
 	providerRepo repository.ProviderRepository,
 	modelMappingRepo repository.ModelMappingRepository,
+	modelPriceRepo repository.ModelPriceRepository,
 ) *ModelsHandler {
 	return &ModelsHandler{
 		responseModelRepo: responseModelRepo,
 		providerRepo:      providerRepo,
 		modelMappingRepo:  modelMappingRepo,
+		modelPriceRepo:    modelPriceRepo,
 	}
 }
 
@@ -114,7 +118,18 @@ func (h *ModelsHandler) collectModelNamesForUserAgent(tenantID uint64, userAgent
 		}
 	}
 
-	appendPricingModelNames(result, userAgent)
+	if h.modelPriceRepo != nil {
+		prices, err := h.modelPriceRepo.ListCurrentPrices()
+		if err != nil {
+			return nil, err
+		}
+		appendModelPriceNames(result, prices, userAgent)
+		if len(prices) == 0 {
+			appendDefaultPricingModelNames(result, userAgent)
+		}
+	} else {
+		appendDefaultPricingModelNames(result, userAgent)
+	}
 
 	names := make([]string, 0, len(result))
 	for name := range result {
@@ -124,9 +139,25 @@ func (h *ModelsHandler) collectModelNamesForUserAgent(tenantID uint64, userAgent
 	return names, nil
 }
 
-func appendPricingModelNames(target map[string]struct{}, userAgent string) {
+func appendDefaultPricingModelNames(target map[string]struct{}, userAgent string) {
 	for _, modelPricing := range pricing.DefaultPriceTable().All() {
 		modelID := strings.TrimSpace(modelPricing.ModelID)
+		if modelID == "" {
+			continue
+		}
+		if !shouldIncludePricingModelForUserAgent(modelID, userAgent) {
+			continue
+		}
+		addModelName(target, modelID)
+	}
+}
+
+func appendModelPriceNames(target map[string]struct{}, prices []*domain.ModelPrice, userAgent string) {
+	for _, price := range prices {
+		if price == nil {
+			continue
+		}
+		modelID := strings.TrimSpace(price.ModelID)
 		if modelID == "" {
 			continue
 		}

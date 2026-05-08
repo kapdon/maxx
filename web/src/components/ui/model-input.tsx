@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { useModelPrices } from '@/hooks/queries';
 
 // 常见模型列表
 const COMMON_MODELS = [
@@ -135,8 +136,13 @@ const COMMON_MODELS = [
   { id: '*', name: 'All models (catch-all)', provider: 'Other' },
 ] as const;
 
-type Model = (typeof COMMON_MODELS)[number];
-type Provider = Model['provider'];
+interface Model {
+  id: string;
+  name: string;
+  provider: string;
+}
+
+type Provider = (typeof COMMON_MODELS)[number]['provider'];
 
 interface ModelInputProps {
   value: string;
@@ -185,6 +191,20 @@ function matchScore(model: Model, pattern: string): number {
   return 40;
 }
 
+function mergeModelOptions(models: Model[]): Model[] {
+  const seen = new Set<string>();
+  const merged: Model[] = [];
+
+  for (const model of models) {
+    const id = model.id.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    merged.push({ ...model, id });
+  }
+
+  return merged;
+}
+
 export function ModelInput({
   value,
   onChange,
@@ -199,12 +219,26 @@ export function ModelInput({
   const [search, setSearch] = useState('');
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const focusedRef = useRef<HTMLButtonElement>(null);
+  const { data: modelPrices } = useModelPrices();
+
+  const pricingModels = useMemo<Model[]>(() => {
+    if (providers && providers.length > 0) return [];
+
+    return (modelPrices || []).map((price) => ({
+      id: price.modelId,
+      name: price.modelId,
+      provider: t('modelInput.configuredPricing'),
+    }));
+  }, [modelPrices, providers, t]);
 
   // Base models filtered by providers prop
   const baseModels = useMemo(() => {
-    if (!providers || providers.length === 0) return [...COMMON_MODELS];
-    return COMMON_MODELS.filter((model) => providers.includes(model.provider));
-  }, [providers]);
+    const staticModels: Model[] =
+      !providers || providers.length === 0
+        ? [...COMMON_MODELS]
+        : COMMON_MODELS.filter((model) => providers.includes(model.provider));
+    return mergeModelOptions([...staticModels, ...pricingModels]);
+  }, [pricingModels, providers]);
 
   // 过滤和排序模型（支持模糊匹配）
   const filteredModels = useMemo(() => {

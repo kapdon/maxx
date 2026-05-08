@@ -1349,7 +1349,8 @@
     "noModelsAvailable": "No models available",
     "pressToUse": "Press {{key}} to use custom model name",
     "toUseCustomModel": "use custom model name",
-    "banned": "Banned"
+    "banned": "Banned",
+    "configuredPricing": "Configured Pricing"
   },
   "stats": {
     "title": "Statistics",

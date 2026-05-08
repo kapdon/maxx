@@ -9,7 +9,7 @@ import (
 
 	"github.com/awsl-project/maxx/internal/adapter/client"
 	"github.com/awsl-project/maxx/internal/adapter/provider/bedrock"
-	_ "github.com/awsl-project/maxx/internal/adapter/provider/claude"  // Register claude adapter
+	_ "github.com/awsl-project/maxx/internal/adapter/provider/claude" // Register claude adapter
 	_ "github.com/awsl-project/maxx/internal/adapter/provider/codex"
 	_ "github.com/awsl-project/maxx/internal/adapter/provider/custom"
 	"github.com/awsl-project/maxx/internal/converter"
@@ -436,6 +436,7 @@ func InitializeServerComponents(
 		repos.ResponseModelRepo,
 		repos.CachedProviderRepo,
 		repos.CachedModelMappingRepo,
+		repos.ModelPriceRepo,
 	)
 	adminHandler := handler.NewAdminHandler(adminService, backupService, logPath)
 	selfServiceHandler := handler.NewSelfServiceHandler(adminService)

@@ -85,3 +85,78 @@ func TestGetModels_ResponseFormat(t *testing.T) {
 		t.Fatalf("Expected model entry 'object' to be 'model', got %v", model["object"])
 	}
 }
+
+func TestModelPricesFeedAvailableModelsForMappingOptions(t *testing.T) {
+	env := NewTestEnv(t)
+
+	for _, price := range []map[string]any{
+		{
+			"modelId":          "gpt-live-mapping-option",
+			"inputPriceMicro":  1000,
+			"outputPriceMicro": 2000,
+		},
+		{
+			"modelId":          "claude-live-mapping-option",
+			"inputPriceMicro":  3000,
+			"outputPriceMicro": 4000,
+		},
+	} {
+		resp := env.AdminPost("/api/admin/model-prices", price)
+		AssertStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+
+	openAIIDs := fetchModelIDsForUserAgent(t, env, "codex_cli_rs/0.99.0")
+	if !containsModelID(openAIIDs, "gpt-live-mapping-option") {
+		t.Fatalf("expected OpenAI/Codex model list to include model from current pricing table")
+	}
+	if containsModelID(openAIIDs, "claude-live-mapping-option") {
+		t.Fatalf("did not expect Claude pricing model in OpenAI/Codex model list")
+	}
+
+	claudeIDs := fetchModelIDsForUserAgent(t, env, "claude-cli/2.1.17")
+	if !containsModelID(claudeIDs, "claude-live-mapping-option") {
+		t.Fatalf("expected Claude model list to include model from current pricing table")
+	}
+	if containsModelID(claudeIDs, "gpt-live-mapping-option") {
+		t.Fatalf("did not expect OpenAI/Codex pricing model in Claude model list")
+	}
+}
+
+func fetchModelIDsForUserAgent(t *testing.T, env *TestEnv, userAgent string) []string {
+	t.Helper()
+
+	req, err := http.NewRequest(http.MethodGet, env.URL("/v1/models"), nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	req.Header.Set("User-Agent", userAgent)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
+	}
+	AssertStatus(t, resp, http.StatusOK)
+
+	var result struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	DecodeJSON(t, resp, &result)
+
+	ids := make([]string, 0, len(result.Data))
+	for _, item := range result.Data {
+		ids = append(ids, item.ID)
+	}
+	return ids
+}
+
+func containsModelID(ids []string, want string) bool {
+	for _, id := range ids {
+		if id == want {
+			return true
+		}
+	}
+	return false
+}

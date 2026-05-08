@@ -1347,7 +1347,8 @@
     "useCustom": "使用自定义：",
     "noModelsAvailable": "无可用模型",
     "pressToUse": "按 {{key}} 使用自定义模型名称",
-    "toUseCustomModel": "使用自定义模型名称"
+    "toUseCustomModel": "使用自定义模型名称",
+    "configuredPricing": "已配置价格"
   },
   "stats": {
     "title": "统计",
